@@ -1,0 +1,22 @@
+
+.uploader-container{
+    display: flex;
+    justify-content: center;
+    background-color: rgb(212, 200, 202);
+    align-items: center;
+    height: 100vh;
+}
+
+.videochat-container{
+    background-color: pink;
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+}
+
+.video-container{
+    background-color: aqua;
+}
+
+.chat-container{
+    background-color: brown;
+}

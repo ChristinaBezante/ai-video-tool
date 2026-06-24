@@ -7,6 +7,7 @@ import axios from 'axios';  ///do in terminal npm install axios
 //to run fastapi dev main.py
 //npm i video.js
 import VideoJSPlayer from './VideoJSPlayer';
+import ChatBot from './Chatbot.jsx'
 
 const Proxeiro = () => {
 
@@ -125,9 +126,9 @@ const Proxeiro = () => {
                         
                         <VideoJSPlayer options={videoJsOptions} onReady={handlePlayerReady}/>
                     </div>
-                    <div className='chat-container'>
-                        <div className='chat'>
-
+                    <div className='chat-sidebar'>
+                        <div className='chat-panel'>
+                            <ChatBot/>
                         </div>
                     </div>
                 </div>

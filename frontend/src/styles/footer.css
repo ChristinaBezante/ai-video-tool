@@ -5,6 +5,7 @@
     height: 300px;
     justify-content: center;
     display: flex;
+    padding-top: 50px;
 }
 
 .footer{

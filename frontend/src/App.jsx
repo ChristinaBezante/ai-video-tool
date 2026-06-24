@@ -1,12 +1,18 @@
 import './App.css'
-import MainPage from './MainPage.jsx'
+import MainPage from './components/MainPage.jsx'
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import Proxeiro from './components/Proxeiro.jsx'
+import Form from './components/Form.jsx';
 
 function App() {
 
   return (
-    <>
-      <MainPage />
-    </>
+    <Router>
+      <Routes>
+        <Route path='/' element={<Form><MainPage></MainPage></Form>}/>
+        <Route path='/upload' element={<Form><Proxeiro></Proxeiro></Form>}/>
+      </Routes>
+    </Router>
   )
 }
 

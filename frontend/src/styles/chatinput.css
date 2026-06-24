@@ -1,0 +1,105 @@
+.chat-input-wrapper {
+  position: sticky;
+  bottom: 0;
+  flex-shrink: 0;
+  background: #fff;
+  padding: 1rem 0;
+}
+
+.chat-input-outer {
+  padding: 0.375rem;
+  background: rgba(59, 130, 246, 0.35); /* similar to bg-primary-blue/35 */
+  border-radius: 1.5rem;
+  z-index: 50;
+  font-family: monospace;
+  transform-origin: bottom;
+  animation: chat 0.4s ease;
+}
+
+.chat-input-inner {
+  position: relative;
+  flex-shrink: 0;
+  padding-right: 0.125rem;
+  background: #fff;
+  border-radius: 1.5rem;
+  overflow: hidden;
+  border: 1px solid #3b82f6; /* primary blue */
+  transition: all 0.2s ease;
+}
+
+.chat-input-inner:focus-within {
+  border-width: 2px;
+}
+
+.chat-textarea {
+  display: block;
+  width: 100%;
+  max-height: 140px;
+  padding: 0.5rem 2.75rem 0.5rem 1rem;
+  background: #fff;
+  border: none;
+  border-radius: 1.5rem;
+  resize: none;
+  outline: none;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.chat-textarea::placeholder {
+  color: #3b82f6;
+  line-height: 1rem;
+  transform: translateY(-0.25rem);
+}
+
+.chat-send-button {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem;
+  border: none;
+  background: transparent;
+  border-radius: 0.5rem;
+  cursor: pointer;
+
+  color: #475569; /* THIS controls lucide icon color */
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.chat-send-button:hover {
+  background: rgba(148, 163, 184, 0.15);
+  color: #0f172a; /* darker on hover */
+}
+
+.chat-send-button:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.chat-send-button img {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+/* Small screen placeholder behavior */
+@media (min-width: 640px) {
+  .chat-textarea::placeholder {
+    line-height: normal;
+    transform: translateY(0);
+  }
+}
+
+/* Equivalent of animate-chat duration-400 */
+@keyframes chat {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scaleY(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}

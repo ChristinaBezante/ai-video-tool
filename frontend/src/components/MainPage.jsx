@@ -1,10 +1,17 @@
-import Header from './components/header.jsx'
-import Footer from './components/Footer.jsx'
+import Header from './header.jsx'
+import Footer from './Footer.jsx'
+import { useNavigate } from "react-router-dom";
 
 function MainPage() {
+
+  const navigate = useNavigate()
+
+  const navToUpload = () => {
+    navigate("/upload")
+  }
+
   return (
     <>
-      <Header />
       <main className="main-hero">
         <section className="hero-panel">
           <div className="hero-copy">
@@ -19,7 +26,7 @@ function MainPage() {
               video data like never before.
             </p>
             <div className="hero-actions">
-              <a className="btn btn-primary" href="#try">Try Now</a>
+              <a className="btn btn-primary" href="#try" onClick={navToUpload}>Try Now</a>
               <a className="btn btn-secondary" href="#features">Learn</a>
             </div>
           </div>
@@ -105,8 +112,6 @@ function MainPage() {
           </div>
         </div>
       </section>
-
-      <Footer />
     </>
   )
 }

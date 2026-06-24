@@ -1,0 +1,78 @@
+.chat-messages {
+  flex-grow: 1;
+  min-height: 0;       /* CRITICAL */
+  overflow-y: auto;
+}
+
+.chat-messages > * + * {
+  margin-top: 1rem; /* space-y-4 */
+}
+
+.chat-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 0.75rem;
+  border-radius: 0.75rem;
+}
+
+.chat-message-user {
+  background: #f7f7f8;
+}
+
+.chat-message-user-icon {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  color: black;
+}
+
+.chat-message-content {
+  flex: 1;
+  min-width: 0;
+  color: #111827;
+}
+
+.chat-textarea {
+  display: block;
+  width: 100%;
+  max-height: 140px;
+  padding: 0.5rem 2.75rem 0.5rem 1rem;
+  background: #fff;
+  color: #111827;          /* makes typed text visible */
+  caret-color: #111827;    /* makes the blinking cursor visible */
+  border: none;
+  border-radius: 1.5rem;
+  resize: none;
+  outline: none;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.chat-message-error {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  color: #dc2626; /* error-red */
+}
+
+.chat-message-error-with-margin {
+  margin-top: 0.5rem;
+}
+
+.chat-message-error-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.markdown-container {
+  color: #111827;
+}
+
+.markdown-container p,
+.markdown-container li,
+.markdown-container span {
+  color: #111827;
+}

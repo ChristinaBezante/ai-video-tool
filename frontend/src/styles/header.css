@@ -1,12 +1,13 @@
 .main-header {
   width: 100%;
-  background: rgba(10, 18, 28, 0.95);
-  backdrop-filter: blur(18px);
-  padding: 20px 0;
+  background: rgba(7, 12, 27, 0.83);
+  backdrop-filter: blur(20px);
+  padding: 22px 0;
   position: sticky;
   top: 0;
   z-index: 100;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(124, 58, 237, 0.1);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.16);
 }
 
 .header-container {
@@ -22,35 +23,97 @@
 .logo-link {
   display: inline-flex;
   align-items: center;
+  gap: 14px;
   text-decoration: none;
 }
 
-.brand-logo {
-  height: 44px;
-  width: auto;
-  display: block;
+.logo-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #7c3aed, #ff3b9a);
+  box-shadow: 0 12px 30px rgba(124, 58, 237, 0.22);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.logo-link:hover .logo-icon {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 36px rgba(124, 58, 237, 0.28);
+}
+
+.logo-icon-svg {
+  width: 20px;
+  height: 20px;
+  color: white;
+}
+
+.logo-label {
+  color: white;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
 }
 
 .main-nav {
   display: flex;
   align-items: center;
-  gap: 32px;
+  gap: 28px;
 }
 
 .nav-link {
-  color: var(--text-strong);
+  color: rgba(255, 255, 255, 0.85);
   text-decoration: none;
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 15px;
   letter-spacing: 0.02em;
   padding: 6px 0;
+  position: relative;
   transition: color 0.2s ease, opacity 0.2s ease;
 }
 
+.nav-link::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  width: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #7c3aed, #ff3b9a);
+  transition: width 0.25s ease;
+}
+
 .nav-link:hover {
-  color: var(--accent-purple);
+  color: white;
+  opacity: 1;
+}
+
+.nav-link:hover::after {
+  width: 100%;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 24px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent-purple), var(--accent-pink));
+  color: var(--text-strong);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.95rem;
+  box-shadow: 0 14px 40px rgba(123, 58, 234, 0.18);
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.btn-primary:hover {
   opacity: 0.92;
+  transform: translateY(-1px);
 }
 
 @media (max-width: 900px) {

@@ -1,5 +1,6 @@
 import Header from './header.jsx'
 import Footer from './Footer.jsx'
+import { Zap, Shield, Users, Star } from 'lucide-react';
 import { useNavigate } from "react-router-dom";
 
 function MainPage() {
@@ -71,47 +72,77 @@ function MainPage() {
 
       <section id="about" className="about-section">
         <div className="about-section-inner">
-          <div className="about-grid">
+          <div className="about-grid about-grid-compact">
             <div className="about-copy">
-              <p className="eyebrow">About Us</p>
-              <h2>Video intelligence designed for teams that need clarity and speed.</h2>
+              <h2>
+                About <span className="feature-heading-accent">Us</span>
+              </h2>
               <p>
-                Ctrl + Vid turns raw footage into searchable insights with fast analysis,
-                polished summaries, and a modern interface built for visual workflows.
+                Ctrl + Vid combines speed, clarity, and privacy into a video workflow that feels
+                effortless and consistent with the rest of the site. We built it for teams who are
+                tired of scrubbing through footage, and for creators who want their video data to be
+                immediately useful, not just stored.
               </p>
-              <div className="about-highlights">
-                <article className="about-highlight">
-                  <span className="about-highlight-icon">⚡</span>
+              <p>
+                Every part of the experience is designed to make video easier to explore, share,
+                and act on — from quick searchable clips to secure collaboration and instant
+                visual summaries.
+              </p>
+              <div className="about-feature-list about-feature-list-compact">
+                <span className="about-feature-pill">Searchable clips</span>
+                <span className="about-feature-pill">Auto summaries</span>
+                <span className="about-feature-pill">Team-friendly</span>
+              </div>
+              <div className="about-team-cards">
+                <article className="team-card about-team-card">
+                  <div className="team-avatar">CB</div>
                   <div>
-                    <h3>Faster decisions</h3>
-                    <p>See key moments and trends immediately, without digging through raw footage.</p>
+                    <h3>Christina - Ioanna Bezante</h3>
+                    <p className="team-role">Co-founder</p>
                   </div>
                 </article>
-                <article className="about-highlight">
-                  <span className="about-highlight-icon">🔍</span>
+                <article className="team-card about-team-card">
+                  <div className="team-avatar">EG</div>
                   <div>
-                    <h3>Actionable insight</h3>
-                    <p>We surface the best information so your team can move with confidence.</p>
+                    <h3>Enterisa Gjozi</h3>
+                    <p className="team-role">Co-founder</p>
                   </div>
                 </article>
               </div>
             </div>
-            <div className="about-card">
-              <span className="about-tag">Built for video teams</span>
-              <h3>From capture to insight, every step feels faster and smarter.</h3>
-              <p>
-                Clean summaries, insightful dashboards, and secure collaboration tools make video data
-                valuable and easy to act on across your whole team.
-              </p>
-              <div className="about-feature-list">
-                <span className="about-feature-pill">Automated scene tagging</span>
-                <span className="about-feature-pill">Insight dashboards</span>
-                <span className="about-feature-pill">Secure collaboration</span>
-              </div>
+            <div className="about-card about-values-card">
+              <article className="about-value-card">
+                <div className="about-value-icon">
+                  <Zap className="about-value-svg" />
+                </div>
+                <div>
+                  <h3>Speed first</h3>
+                  <p>Quick analysis and instant access keep the workflow moving.</p>
+                </div>
+              </article>
+              <article className="about-value-card">
+                <div className="about-value-icon">
+                  <Shield className="about-value-svg" />
+                </div>
+                <div>
+                  <h3>Your content, your control</h3>
+                  <p>Secure processing and private uploads make the product feel trustworthy.</p>
+                </div>
+              </article>
+              <article className="about-value-card">
+                <div className="about-value-icon">
+                  <Users className="about-value-svg" />
+                </div>
+                <div>
+                  <h3>Built for teams</h3>
+                  <p>Designed to work equally well for solo creators and larger video teams.</p>
+                </div>
+              </article>
             </div>
           </div>
         </div>
       </section>
+
     </>
   )
 }

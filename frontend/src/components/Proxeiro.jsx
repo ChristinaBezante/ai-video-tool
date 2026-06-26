@@ -17,7 +17,8 @@ const Proxeiro = () => {
     const [isUploading, setIsUploading] = useState(false);
 
     const playerRef = React.useRef(null);
-    const inputRef = useRef(null);
+    const uploadInputRef = useRef(null);
+    const replaceInputRef = useRef(null);
 
     const uploadVideo = async (fileToUpload) => {
         const url = 'http://localhost:8000/uploadfile/';
@@ -75,9 +76,16 @@ const Proxeiro = () => {
     }
 
     const handleUploadAreaClick = () => {
-        if (inputRef.current) {
-            inputRef.current.value = '';
-            inputRef.current.click();
+        if (uploadInputRef.current) {
+            uploadInputRef.current.value = '';
+            uploadInputRef.current.click();
+        }
+    };
+
+    const handleReplaceClick = () => {
+        if (replaceInputRef.current) {
+            replaceInputRef.current.value = '';
+            replaceInputRef.current.click();
         }
     };
 
@@ -160,7 +168,7 @@ const Proxeiro = () => {
                     {!uploadedFileURL ? (
                         <form className="upload-dropzone" onSubmit={handleSubmit}>
                             <input
-                                ref={inputRef}
+                                ref={uploadInputRef}
                                 className="upload-input"
                                 type="file"
                                 accept="video/*"
@@ -209,11 +217,11 @@ const Proxeiro = () => {
                                     <p className="upload-status"><CheckCircle2 size={16} /> Video ready</p>
                                     <h2>{file?.name ?? 'Uploaded video'}</h2>
                                 </div>
-                                <button className="upload-secondary-action" type="button" onClick={handleUploadAreaClick}>
+                                <button className="upload-secondary-action" type="button" onClick={handleReplaceClick}>
                                     Replace file
                                 </button>
                                 <input
-                                    ref={inputRef}
+                                    ref={replaceInputRef}
                                     className="upload-input"
                                     type="file"
                                     accept="video/*"

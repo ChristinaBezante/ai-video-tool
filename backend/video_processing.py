@@ -1,74 +1,104 @@
-#   edw tha kanoume 
-#ffmpeg ops
-#extract audio
-# extract frames
-#paroume metadata tou video
-# Responsible for video-related tasks:
-
-# Save uploaded video
-# Extract audio with FFmpeg
-# Extract frames (if needed)
-# Read video metadata (duration, fps, etc.)
-# Return paths to generated files
-
-#################Extract audio
-
-#https://stackoverflow.com/questions/9913032/how-can-i-extract-audio-from-video-with-ffmpeg
-#https://www.clipcat.com/blog/a-beginners-guide-to-using-ffmpeg-in-python-for-video-processing/#extract-audio-from-a-video
-#https://koshurai.medium.com/audio-extraction-from-video-python-8f7c8352a97b
-
 import ffmpeg
-import os
 from pathlib import Path
 
-# Load the video file
-#input_file = ffmpeg.input('./nnVideo.mp4')
-
-# Extract the audio and save it as an MP3 file
-#input_file.output('audio.mp3', acodec='libshine').run()
-
-#import ffmpeg
-#(
-
-    #ffmpeg.input("input.mp4")
-	#.output("audio.mp3", acodec="libshine")
-	#.run()
-#)
 
 def extract_audio(video_path, output_audio):
+    """Extract speech-friendly WAV audio from a video file.
 
-	try:
-		(
-			ffmpeg.input(str(video_path))
-			.output(str(output_audio), acodec='pcm_s16le', ac=1, ar='16000')  #ffmpeg -i input.mp4 -vn -acodec pcm_s16le -ar 44100 -ac 2 output.wav  https://superuser.com/questions/609740/extracting-wav-from-mp4-while-preserving-the-highest-possible-quality
-			.overwrite_output()
-			.run()                                                       #to chatgpt evgale ac=1 ar=16k
-		)                                                           
-		print(f"Audio extracted successfully to {output_audio}")
+    Output format is PCM 16-bit, mono, 16 kHz. This is a common baseline for
+    ASR/transcription pipelines and keeps file handling simple downstream.
+    """
+    try:
+        (
+            ffmpeg.input(str(video_path))
+            # acodec: PCM signed 16-bit little-endian
+            # ac: mono channel
+            # ar: sample rate (Hz)
+            .output(str(output_audio), acodec="pcm_s16le", ac=1, ar="16000")
+            # overwrite_output avoids interactive ffmpeg prompts on re-uploads.
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        print(f"Audio extracted successfully to {output_audio}")
+    except ffmpeg.Error as e:
+        stderr = e.stderr.decode(errors="replace") if e.stderr else str(e)
+        raise RuntimeError(f"Audio extraction failed: {stderr}") from e
 
-	except ffmpeg.Error as e:
-		stderr = e.stderr.decode(errors='replace') if e.stderr else str(e)
-		raise RuntimeError(f"Audio extraction failed: {stderr}") from e
 
+def extract_frames(
+    video_path,
+    output_dir,
+    interval_seconds=5.0,
+    keyframes_only=True,
+    max_width=0,
+    quality=5,
+):
+    """Extract sampled JPEG frames from video_path into output_dir.
 
+    Processing model:
+    1) Clean existing frame files in output_dir
+    2) Build ffmpeg input (optionally keyframe-only decoding)
+    3) Apply fps sampling filter based on interval_seconds
+    4) Optionally resize frames to max_width
+    5) Save sequential images: frame000001.jpg, frame000002.jpg, ...
 
+    interval_seconds: seconds between sampled frames.
+    keyframes_only: if True, decode keyframes only. Faster on long videos but
+        timestamps are less uniform than full decode.
+    max_width: if > 0, constrain output width while preserving aspect ratio.
+    quality: JPEG q:v quality (2 best quality/larger files .. 31 lowest quality).
+    """
+    try:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-##########extract frames  douleuei apla to kanw comment giati pernei ligo wra gia na to kanei 
+        # Remove old frames so repeated processing of the same video stem does
+        # not mix previous and current outputs.
+        for old_frame in output_dir.glob("frame*.jpg"):
+            old_frame.unlink(missing_ok=True)
 
-# def extract_frames(video_path, output_dir):
-#     try:
+        input_kwargs = {}
+        if keyframes_only:
+            # skip_frame=nokey tells decoder to skip non-key frames early.
+            # This usually gives a major speed-up for long GOP videos.
+            input_kwargs["skip_frame"] = "nokey"
 
-#         output_dir = Path(output_dir)
-#         output_dir.mkdir(parents=True, exist_ok=True)
-#         output_pattern = output_dir / 'frame_%04d.jpg'
-        
-#         (
-#             ffmpeg.input(str(video_path))                             
-#             .filter('fps', fps=1/5)    # Extract 1 frame per 5 sec
-#             .output(str(output_pattern))  #ffmpeg -i big_buck_bunny_720p_2mb.mp4 -r 1 frame%d.png
-#             .run()
-#         )
-#         print(f"Frames extracted successfully to {output_dir}")
-#     except ffmpeg.Error as e:
-#         print(f"An error occurred: {e.stderr.decode()}")
+        # Build ffmpeg input stream from the on-disk video path.
+        stream = ffmpeg.input(str(video_path), **input_kwargs)
 
+        # Prevent invalid/zero fps math when interval is <= 0.
+        safe_interval = max(float(interval_seconds), 0.1)
+        vf_parts = [f"fps=1/{safe_interval}"]
+
+        if max_width and int(max_width) > 0:
+            # scale=min(max_width, iw):-2 => do not upscale, preserve aspect,
+            # and force an even height value required by many codecs/pipelines.
+            vf_parts.append(f"scale='min({int(max_width)},iw)':-2")
+
+        output_pattern = output_dir / "frame%06d.jpg"
+
+        (
+            stream.output(
+                str(output_pattern),
+                vf=",".join(vf_parts),
+                format="image2",
+                # vfr writes frames at selected timestamps without duplicating
+                # frames to match a fixed output frame rate.
+                vsync="vfr",
+                **{"q:v": max(2, min(int(quality), 31))},
+                start_number=1,
+            )
+            .overwrite_output()
+            # threads=0 lets ffmpeg auto-select thread count for this machine.
+            # loglevel=error keeps logs concise while preserving failures.
+            .global_args("-threads", "0", "-loglevel", "error")
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+
+        # Count generated files so caller can report extraction volume.
+        frame_count = len(list(output_dir.glob("frame*.jpg")))
+        print(f"Frames extracted successfully to {output_dir} (count={frame_count})")
+        return frame_count
+    except ffmpeg.Error as e:
+        stderr = e.stderr.decode(errors="replace") if e.stderr else str(e)
+        raise RuntimeError(f"Frame extraction failed: {stderr}") from e

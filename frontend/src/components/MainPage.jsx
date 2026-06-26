@@ -110,7 +110,7 @@ function MainPage() {
               </p>
               <p>
                 Every part of the experience is designed to make video easier to explore, share,
-                and act on — from quick searchable clips to secure collaboration and instant
+                and act on from quick searchable clips to secure collaboration and instant
                 visual summaries.
               </p>
               <div className="about-feature-list about-feature-list-compact">

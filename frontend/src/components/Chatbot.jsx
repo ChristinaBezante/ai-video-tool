@@ -54,21 +54,12 @@ function Chatbot() {
     }
   }
 
-  return (
-    <div className="chatbot">
-      {messages.length === 0 && (
-        <div className="chatbot-welcome">
-          <p>👋 Welcome!</p>
-          <p>
-            I am powered by the latest technology reports from leading
-            institutions like the World Bank, the World Economic Forum,
-            McKinsey, Deloitte and the OECD.
-          </p>
-          <p>Ask me anything about the latest technology trends.</p>
-        </div>
-      )}
+  const isEmpty = messages.length === 0;
 
-      <ChatMessages messages={messages} isLoading={isLoading} />
+  return (
+    <div className={`chatbot ${isEmpty ? 'chatbot-empty' : 'chatbot-live'}`}>
+
+      {!isEmpty && <ChatMessages messages={messages} isLoading={isLoading} />}
 
       <ChatInput
         newMessage={newMessage}

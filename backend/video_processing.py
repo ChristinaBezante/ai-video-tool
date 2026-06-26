@@ -41,12 +41,14 @@ def extract_audio(video_path, output_audio):
 		(
 			ffmpeg.input(str(video_path))
 			.output(str(output_audio), acodec='pcm_s16le', ac=1, ar='16000')  #ffmpeg -i input.mp4 -vn -acodec pcm_s16le -ar 44100 -ac 2 output.wav  https://superuser.com/questions/609740/extracting-wav-from-mp4-while-preserving-the-highest-possible-quality
+			.overwrite_output()
 			.run()                                                       #to chatgpt evgale ac=1 ar=16k
 		)                                                           
 		print(f"Audio extracted successfully to {output_audio}")
 
 	except ffmpeg.Error as e:
-		print(f"An error occurred: {e.stderr.decode()}")
+		stderr = e.stderr.decode(errors='replace') if e.stderr else str(e)
+		raise RuntimeError(f"Audio extraction failed: {stderr}") from e
 
 
 

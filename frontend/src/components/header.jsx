@@ -12,9 +12,9 @@ export default function Header() {
           <span className="logo-label">Ctrl + Vid</span>
         </a>
         <nav className="main-nav">
-          <a href="#features" className="nav-link">Discover</a>
-          <a href="#about" className="nav-link">About Us</a>
-          <a href="#get-started" className="btn btn-primary">Get Started</a>
+          <a href="/#features" className="nav-link">Discover</a>
+          <a href="/#about" className="nav-link">About Us</a>
+          <a href="/upload" className="btn btn-primary">Get Started</a>
         </nav>
       </div>
     </header>

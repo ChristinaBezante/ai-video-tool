@@ -1,13 +1,32 @@
 import Header from './header.jsx'
 import Footer from './Footer.jsx'
+import { useEffect } from 'react';
 import { Zap, Shield, Users, Star } from 'lucide-react';
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 function MainPage() {
 
   const navigate = useNavigate()
+  const location = useLocation()
 
-  const navToUpload = () => {
+  useEffect(() => {
+    if (!location.hash) {
+      return;
+    }
+
+    const targetId = location.hash.replace('#', '');
+    const target = document.getElementById(targetId);
+    if (!target) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [location.hash]);
+
+  const navToUpload = (event) => {
+    event.preventDefault()
     navigate("/upload")
   }
 
@@ -27,12 +46,18 @@ function MainPage() {
               video data like never before.
             </p>
             <div className="hero-actions">
-              <a className="btn btn-primary" href="#try" onClick={navToUpload}>Try Now</a>
+              <a className="btn btn-primary" href="/upload" onClick={navToUpload}>Try Now</a>
               <a className="btn btn-secondary" href="#features">Learn</a>
             </div>
           </div>
           <div className="hero-visual">
-            <div className="hero-card" />
+            <div className="hero-card">
+              <img
+                src="/uploads/scissors-cutting.png"
+                alt="Scissors cutting video frame"
+                className="hero-card-image"
+              />
+            </div>
           </div>
         </section>
       </main>
@@ -65,7 +90,7 @@ function MainPage() {
             </article>
           </div>
           <div className="feature-cta">
-            <a className="btn btn-primary btn-card-cta" href="#get-started">Start Analysis</a>
+            <a className="btn btn-primary btn-card-cta" href="/upload" onClick={navToUpload}>Start Analysis</a>
           </div>
         </div>
       </section>

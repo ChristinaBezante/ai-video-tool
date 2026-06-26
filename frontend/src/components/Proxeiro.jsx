@@ -1,8 +1,7 @@
-//https://blog.filestack.com/react-file-upload-tutorial-filestack/
-
 import '../styles/proxeiro.css'
-import React,{useState} from 'react';
+import React,{useRef, useState} from 'react';
 import axios from 'axios';  ///do in terminal npm install axios
+import { CloudUpload, MessageCircle, ChevronRight, LoaderCircle, CheckCircle2 } from 'lucide-react';
 //pip install "fastapi[standard]"
 //to run fastapi dev main.py
 //npm i video.js
@@ -11,50 +10,41 @@ import ChatBot from './Chatbot.jsx'
 
 const Proxeiro = () => {
 
-    const [file, setFile] = useState();
+    const [file, setFile] = useState(null);
     const [uploadProgress, setUploadProgres] = useState(0);
     const [uploadedFileURL, setUploadedFileURL] = useState(null);
+    const [uploadError, setUploadError] = useState('');
+    const [isUploading, setIsUploading] = useState(false);
 
     const playerRef = React.useRef(null);
+    const inputRef = useRef(null);
 
-    const handleChange = (event) =>{
-        setFile(event.target.files[0]);
-    }
-
-    //async function handleSubmit(event){
-    const handleSubmit = async (event) => {
-
-        event.preventDefault();
-
-        const url = 'http://localhost:8000/uploadfile/'; 
+    const uploadVideo = async (fileToUpload) => {
+        const url = 'http://localhost:8000/uploadfile/';
         const formData = new FormData();
-        formData.append('file_upload', file);
-        formData.append('filename', file.name);
-        // const config={
-        //     headers:{
-        //         'content-type': 'multipart/form-data',
-        //     },
-        // };
+        formData.append('file_upload', fileToUpload);
+        formData.append('filename', fileToUpload.name);
+
         try{
-            //axios.post(url,formData,config).then((response) => {
-            //console.log(response.data)});
-            // const response = await axios.post(url, formData, {
-            //     headers: {
-            //         'Content-Type': 'multipart/form-data',
-            //     },
-            //  });
+            setIsUploading(true);
+            setUploadError('');
             const config = {
-                //https://stackoverflow.com/questions/41088022/how-to-get-onuploadprogress-in-axios
                 onUploadProgress: progressEvent => {
-                    const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    const total = progressEvent.total || 1;
+                    const percentCompleted = Math.round((progressEvent.loaded * 100) / total);
                     setUploadProgres(percentCompleted);
                 }
             }
             const response = await axios.post(url, formData, config);
-            setUploadedFileURL(`http://localhost:8000${response.data.file_url}`);
-            console.log(response.data);  
-            console.log(response.data.file_url);          
+
+            // Add a cache-busting query so replacing an existing filename shows the new video.
+            const fileUrl = `http://localhost:8000${response.data.file_url}?t=${Date.now()}`;
+            setUploadedFileURL(fileUrl);
+            setUploadProgres(100);
+            console.log(response.data);
+            console.log(response.data.file_url);
         }catch(error){
+            setUploadError('Upload failed. Check that the FastAPI backend is running and try again.');
             if(error.response){
                 console.log(error.response.data);
                 console.log(error.response.status);
@@ -64,7 +54,59 @@ const Proxeiro = () => {
             }else{
                 console.log('Error', error.message);
             }
+        } finally {
+            setIsUploading(false);
         }
+    };
+
+    const handleChange = (event) =>{
+        const nextFile = event.target.files[0] ?? null;
+        if (!nextFile) {
+            return;
+        }
+
+        setFile(nextFile);
+        setUploadError('');
+        setUploadProgres(0);
+
+        if (uploadedFileURL) {
+            uploadVideo(nextFile);
+        }
+    }
+
+    const handleUploadAreaClick = () => {
+        if (inputRef.current) {
+            inputRef.current.value = '';
+            inputRef.current.click();
+        }
+    };
+
+    const handleDragOver = (event) => {
+        event.preventDefault();
+    };
+
+    const handleDrop = (event) => {
+        event.preventDefault();
+        const droppedFile = event.dataTransfer.files?.[0] ?? null;
+        if (!droppedFile) {
+            return;
+        }
+        setFile(droppedFile);
+        setUploadError('');
+        setUploadProgres(0);
+    };
+
+    //async function handleSubmit(event){
+    const handleSubmit = async (event) => {
+
+        event.preventDefault();
+
+        if (!file) {
+            setUploadError('Select a video file before uploading.');
+            return;
+        }
+
+        await uploadVideo(file);
     }
 
     //https://medium.com/@codeawake/ai-chatbot-frontend-1823b9c78521
@@ -106,34 +148,108 @@ const Proxeiro = () => {
     };
 
     return(
-        <>
-            {!uploadedFileURL? (
-                <div className="uploader-container"> 
-                    <form action="" onSubmit={handleSubmit}>
-                        <h1>React FileUploader</h1>
-                        <input type="file" name="" id="" onChange={handleChange} />
-                        <button type="submit">Upload</button>
-                        <progress value={uploadProgress} max="100"></progress>
-                    </form>
-                    {/*uploadedFileURL && <img src={uploadedFileURL} alt="Uploaded file" />*/}
-                    {/*https://www.w3schools.com/Html/html5_video.asp*/}
-                    {/*uploadedFileURL && <video  width="320" height="240" controls><source src={uploadedFileURL} type="video/mp4" /></video>*/}
-                    {/*uploadedFileURL && <VideoJSPlayer options={videoJsOptions} onReady={handlePlayerReady}/>*/}
+        <section className="upload-shell">
+            <div className="upload-hero">
+                <p className="upload-eyebrow">Video Research Workspace</p>
+                <h1>Ask questions <span className="feature-heading-accent">about your videos</span></h1>
+                <p className="upload-subtitle">Upload a clip, extract the audio pipeline, and move straight into the AI-assisted review flow.</p>
+            </div>
+
+            <div className={`upload-grid${uploadedFileURL ? ' upload-grid-loaded' : ''}`}>
+                <div className="upload-center-card">
+                    {!uploadedFileURL ? (
+                        <form className="upload-dropzone" onSubmit={handleSubmit}>
+                            <input
+                                ref={inputRef}
+                                className="upload-input"
+                                type="file"
+                                accept="video/*"
+                                onChange={handleChange}
+                            />
+
+                            <button
+                                type="button"
+                                className="upload-dropzone-button"
+                                onClick={handleUploadAreaClick}
+                                onDragOver={handleDragOver}
+                                onDrop={handleDrop}
+                            >
+                                <span className="upload-dropzone-icon">
+                                    <CloudUpload size={48} strokeWidth={1.7} />
+                                </span>
+                                <span className="upload-dropzone-title">Drag and drop or click to upload</span>
+                                <span className="upload-dropzone-copy">Supports video files and sends them directly to the backend processing pipeline.</span>
+                            </button>
+
+                            <div className="upload-form-footer">
+                                <div className="upload-file-meta">
+                                    <span className="upload-file-label">Selected file</span>
+                                    <strong>{file ? file.name : 'No file selected yet'}</strong>
+                                </div>
+                                <button className="upload-submit" type="submit" disabled={!file || isUploading}>
+                                    {isUploading ? <LoaderCircle className="spin" size={18} /> : <ChevronRight size={18} />}
+                                    <span>{isUploading ? 'Uploading...' : 'Start analysis'}</span>
+                                </button>
+                            </div>
+
+                            <div className="upload-progress-block">
+                                <div className="upload-progress-labels">
+                                    <span>Upload progress</span>
+                                    <span>{uploadProgress}%</span>
+                                </div>
+                                <progress value={uploadProgress} max="100"></progress>
+                            </div>
+
+                            {uploadError ? <p className="upload-error">{uploadError}</p> : null}
+                        </form>
+                    ) : (
+                        <div className="upload-loaded-stage">
+                            <div className="upload-loaded-header">
+                                <div>
+                                    <p className="upload-status"><CheckCircle2 size={16} /> Video ready</p>
+                                    <h2>{file?.name ?? 'Uploaded video'}</h2>
+                                </div>
+                                <button className="upload-secondary-action" type="button" onClick={handleUploadAreaClick}>
+                                    Replace file
+                                </button>
+                                <input
+                                    ref={inputRef}
+                                    className="upload-input"
+                                    type="file"
+                                    accept="video/*"
+                                    onChange={handleChange}
+                                />
+                            </div>
+                            <div className='video-container'>
+                                <VideoJSPlayer options={videoJsOptions} onReady={handlePlayerReady}/>
+                            </div>
+                        </div>
+                    )}
                 </div>
-            ) : (
-                <div className='videochat-container'>
-                    <div className='video-container'>
-                        
-                        <VideoJSPlayer options={videoJsOptions} onReady={handlePlayerReady}/>
-                    </div>
-                    <div className='chat-sidebar'>
+
+                {uploadedFileURL ? (
+                    <div className="upload-chat-shell upload-chat-shell-inline">
                         <div className='chat-panel'>
                             <ChatBot/>
                         </div>
                     </div>
+                ) : null}
+            </div>
+
+            {!uploadedFileURL ? (
+                <div className="upload-lower-panel">
+                    <div className="upload-chat-shell">
+                        <div className="upload-chat-placeholder">
+                            <MessageCircle size={20} strokeWidth={2} />
+                            <input type="text" value="Upload a video to unlock the chat panel" readOnly />
+                            <button type="button" disabled>
+                                <ChevronRight size={18} strokeWidth={2} />
+                            </button>
+                        </div>
+                    </div>
                 </div>
-            )}
-        </>
+            ) : null}
+        </section>
 
     );
 

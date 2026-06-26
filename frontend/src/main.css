@@ -77,12 +77,23 @@
   overflow: hidden;
 }
 
+.hero-card-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  z-index: 0;
+}
+
 .hero-card::before {
   content: '';
   position: absolute;
   inset: 0;
   background: radial-gradient(circle at top left, rgba(191, 172, 252, 0.32), transparent 28%),
     radial-gradient(circle at bottom right, rgba(255, 91, 168, 0.22), transparent 18%);
+  z-index: 1;
 }
 
 .main-transition {

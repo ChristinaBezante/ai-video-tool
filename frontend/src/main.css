@@ -277,7 +277,128 @@
 .about-values-card {
   display: flex;
   flex-direction: column;
+  gap: 22px;
+  position: relative;
+  overflow: hidden;
+  padding: 34px 30px 30px;
+  border-radius: 34px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 88, 168, 0.12), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(112, 77, 255, 0.16), transparent 34%),
+    rgba(9, 10, 25, 0.92);
+  border: 1px solid rgba(140, 114, 255, 0.22);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.34);
+}
+
+.about-values-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 18%);
+  pointer-events: none;
+}
+
+.about-values-eyebrow {
+  margin: 0;
+  color: #9f8cff;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.about-values-stack {
+  display: grid;
+  gap: 22px;
+  position: relative;
+  z-index: 1;
+}
+
+.about-value-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
   gap: 18px;
+  align-items: start;
+  position: relative;
+}
+
+.about-value-row + .about-value-row::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: -18px;
+  width: 1px;
+  height: 18px;
+  background: linear-gradient(180deg, rgba(165, 122, 255, 0.34), rgba(165, 122, 255, 0));
+}
+
+.about-value-rail {
+  position: relative;
+  width: 20px;
+  min-height: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.about-value-rail::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  bottom: -4px;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(164, 125, 255, 0.55), rgba(164, 125, 255, 0.08));
+}
+
+.about-value-row:last-child .about-value-rail::before {
+  bottom: 8px;
+}
+
+.about-value-dot {
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c4dff 0%, #ff63b5 100%);
+  box-shadow: 0 0 0 7px rgba(124, 77, 255, 0.08);
+  position: relative;
+  z-index: 1;
+}
+
+.about-value-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.about-value-kicker {
+  color: #c4b3ff;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.about-value-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.about-value-heading .about-value-svg {
+  flex: 0 0 auto;
+}
+
+.about-values-card .about-value-content h3 {
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
+.about-value-row-highlight .about-value-dot {
+  background: linear-gradient(135deg, #ff63b5 0%, #ff8ad0 100%);
+  box-shadow: 0 0 0 7px rgba(255, 99, 181, 0.1);
 }
 
 .about-tag {
@@ -442,6 +563,18 @@
 
   .about-copy h2 {
     font-size: 2.4rem;
+  }
+
+  .about-values-card {
+    padding: 28px 20px 22px;
+  }
+
+  .about-value-row {
+    gap: 14px;
+  }
+
+  .about-value-heading {
+    align-items: flex-start;
   }
 }
 

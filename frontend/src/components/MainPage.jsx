@@ -136,33 +136,50 @@ function MainPage() {
               </div>
             </div>
             <div className="about-card about-values-card">
-              <article className="about-value-card">
-                <div className="about-value-icon">
-                  <Zap className="about-value-svg" />
-                </div>
-                <div>
-                  <h3>Speed first</h3>
-                  <p>Quick analysis and instant access keep the workflow moving.</p>
-                </div>
-              </article>
-              <article className="about-value-card">
-                <div className="about-value-icon">
-                  <Shield className="about-value-svg" />
-                </div>
-                <div>
-                  <h3>Your content, your control</h3>
-                  <p>Secure processing and private uploads make the product feel trustworthy.</p>
-                </div>
-              </article>
-              <article className="about-value-card">
-                <div className="about-value-icon">
-                  <Users className="about-value-svg" />
-                </div>
-                <div>
-                  <h3>Built for teams</h3>
-                  <p>Designed to work equally well for solo creators and larger video teams.</p>
-                </div>
-              </article>
+              <p className="about-values-eyebrow">Core values</p>
+              <div className="about-values-stack">
+                <article className="about-value-row">
+                  <span className="about-value-rail" aria-hidden="true">
+                    <span className="about-value-dot" />
+                  </span>
+                  <div className="about-value-content">
+                    <span className="about-value-kicker">01</span>
+                    <div className="about-value-heading">
+                      <Zap className="about-value-svg" />
+                      <h3>Speed first</h3>
+                    </div>
+                    <p>Quick analysis and instant access keep the workflow moving.</p>
+                  </div>
+                </article>
+
+                <article className="about-value-row">
+                  <span className="about-value-rail" aria-hidden="true">
+                    <span className="about-value-dot" />
+                  </span>
+                  <div className="about-value-content">
+                    <span className="about-value-kicker">02</span>
+                    <div className="about-value-heading">
+                      <Shield className="about-value-svg" />
+                      <h3>Your content, your control</h3>
+                    </div>
+                    <p>Secure processing and private uploads make the product feel trustworthy.</p>
+                  </div>
+                </article>
+
+                <article className="about-value-row about-value-row-highlight">
+                  <span className="about-value-rail" aria-hidden="true">
+                    <span className="about-value-dot" />
+                  </span>
+                  <div className="about-value-content">
+                    <span className="about-value-kicker">03</span>
+                    <div className="about-value-heading">
+                      <Users className="about-value-svg" />
+                      <h3>Built for teams</h3>
+                    </div>
+                    <p>Designed to work equally well for solo creators and larger video teams.</p>
+                  </div>
+                </article>
+              </div>
             </div>
           </div>
         </div>

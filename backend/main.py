@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from video_processing import extract_audio
 from video_processing import extract_frames
+from whisper import transcribe_audio
 
 # Runtime folder layout used by this API:
 # - uploads/: original uploaded video files
@@ -97,6 +98,14 @@ async def create_upload_file(
     output_audio = AUDIO_DIR / f"{save_to.stem}.wav"
     extract_audio(video_path, output_audio)
 
+    transcript = transcribe_audio(str(output_audio))
+
+    # Save transcript JSON next to the audio file
+    transcript_path = AUDIO_DIR / f"{save_to.stem}.json"
+
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        json.dump(transcript, f, indent=2, ensure_ascii=False)
+
     # Frames are grouped per upload stem to avoid collisions between videos.
     output_frames_dir = FRAMES_DIR / save_to.stem
     frame_count = extract_frames(
@@ -114,6 +123,8 @@ async def create_upload_file(
         "filename": file_upload.filename,
         "file_url": f"/uploads/{file_upload.filename}",
         "audio_url": f"/audio/{save_to.stem}.wav",
+        "transcript_url": f"/audio/{save_to.stem}.json",
+        "transcript": transcript,
         "frame_count": frame_count,
         "frames_url_prefix": f"/frames/{save_to.stem}/",
         "frame_settings": {

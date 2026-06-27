@@ -2,3 +2,4 @@ venv
 backend/audio/
 backend/uploads/
 frontend/public/uploads/
+backend/.env

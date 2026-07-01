@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+ffmpeg-python
+huggingface_hub
+python-dotenv
+python-multipart
+transformers
+torch
+torchvision
+pillow

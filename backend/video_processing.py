@@ -29,6 +29,8 @@ def extract_frames(
     video_path,
     output_dir,
     interval_seconds=5.0,
+    extraction_mode="scene",
+    scene_threshold=0.35,
     keyframes_only=True,
     max_width=0,
     quality=5,
@@ -38,10 +40,14 @@ def extract_frames(
     Processing model:
     1) Clean existing frame files in output_dir
     2) Build ffmpeg input (optionally keyframe-only decoding)
-    3) Apply fps sampling filter based on interval_seconds
+    3) Apply frame-selection filter:
+       - scene mode: keep frames where FFmpeg scene score exceeds threshold
+       - interval mode: fps sampling based on interval_seconds
     4) Optionally resize frames to max_width
     5) Save sequential images: frame000001.jpg, frame000002.jpg, ...
 
+    extraction_mode: "scene" or "interval".
+    scene_threshold: FFmpeg scene-change threshold (0.0..1.0), used in scene mode.
     interval_seconds: seconds between sampled frames.
     keyframes_only: if True, decode keyframes only. Faster on long videos but
         timestamps are less uniform than full decode.
@@ -66,9 +72,19 @@ def extract_frames(
         # Build ffmpeg input stream from the on-disk video path.
         stream = ffmpeg.input(str(video_path), **input_kwargs)
 
-        # Prevent invalid/zero fps math when interval is <= 0.
-        safe_interval = max(float(interval_seconds), 0.1)
-        vf_parts = [f"fps=1/{safe_interval}"]
+        safe_mode = str(extraction_mode or "scene").strip().lower()
+        if safe_mode not in {"scene", "interval"}:
+            raise ValueError("extraction_mode must be either 'scene' or 'interval'")
+
+        vf_parts = []
+        if safe_mode == "scene":
+            safe_scene_threshold = min(max(float(scene_threshold), 0.0), 1.0)
+            # Keep only frames with significant visual difference.
+            vf_parts.append(f"select='gt(scene\\,{safe_scene_threshold:.3f})'")
+        else:
+            # Prevent invalid/zero fps math when interval is <= 0.
+            safe_interval = max(float(interval_seconds), 0.1)
+            vf_parts.append(f"fps=1/{safe_interval}")
 
         if max_width and int(max_width) > 0:
             # scale=min(max_width, iw):-2 => do not upscale, preserve aspect,
@@ -99,6 +115,8 @@ def extract_frames(
         frame_count = len(list(output_dir.glob("frame*.jpg")))
         print(f"Frames extracted successfully to {output_dir} (count={frame_count})")
         return frame_count
+    except ValueError as e:
+        raise RuntimeError(f"Frame extraction failed: {e}") from e
     except ffmpeg.Error as e:
         stderr = e.stderr.decode(errors="replace") if e.stderr else str(e)
         raise RuntimeError(f"Frame extraction failed: {stderr}") from e

@@ -1,5 +1,5 @@
 import '../styles/proxeiro.css'
-import React,{useRef, useState} from 'react';
+import React,{useEffect, useRef, useState} from 'react';
 import axios from 'axios';  ///do in terminal npm install axios
 import { CloudUpload, MessageCircle, ChevronRight, LoaderCircle, CheckCircle2 } from 'lucide-react';
 //pip install "fastapi[standard]"
@@ -12,13 +12,65 @@ const Proxeiro = () => {
 
     const [file, setFile] = useState(null);
     const [uploadProgress, setUploadProgres] = useState(0);
+    const [backendProgress, setBackendProgress] = useState(0);
     const [uploadedFileURL, setUploadedFileURL] = useState(null);
     const [uploadError, setUploadError] = useState('');
     const [isUploading, setIsUploading] = useState(false);
+    const [processingStage, setProcessingStage] = useState('idle');
 
     const playerRef = React.useRef(null);
     const uploadInputRef = useRef(null);
     const replaceInputRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            setIsUploading(false);
+        };
+    }, []);
+
+    const stageLabel = (stage) => {
+        if (stage === 'extracting_audio') return 'Processing: extracting audio...';
+        if (stage === 'transcribing') return 'Processing: transcribing audio...';
+        if (stage === 'extracting_frames') return 'Processing: extracting frames...';
+        if (stage === 'queued') return 'Processing queued...';
+        if (stage === 'completed') return 'Processing completed.';
+        if (stage === 'failed') return 'Processing failed.';
+        return '';
+    };
+
+    const wait = (ms) => new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+
+    const pollUploadStatus = async (jobId) => {
+        const statusUrl = `http://localhost:8000/upload-status/${jobId}`;
+
+        for (let attempt = 0; attempt < 600; attempt += 1) {
+            const { data } = await axios.get(statusUrl);
+            const status = data?.status;
+            const stage = data?.stage || 'processing';
+            const progress = Number(data?.progress ?? 0);
+            setProcessingStage(stage);
+            if (!Number.isNaN(progress)) {
+                setBackendProgress(Math.max(0, Math.min(100, progress)));
+            }
+
+            if (status === 'completed') {
+                const result = data?.result || {};
+                const fileUrl = `http://localhost:8000${result.file_url}?t=${Date.now()}`;
+                setUploadedFileURL(fileUrl);
+                return;
+            }
+
+            if (status === 'failed') {
+                throw new Error(data?.error || 'Upload processing failed.');
+            }
+
+            await wait(1200);
+        }
+
+        throw new Error('Processing timed out. Try a shorter video or retry.');
+    };
 
     const uploadVideo = async (fileToUpload) => {
         const url = 'http://localhost:8000/uploadfile/';
@@ -29,6 +81,9 @@ const Proxeiro = () => {
         try{
             setIsUploading(true);
             setUploadError('');
+            setUploadedFileURL(null);
+            setProcessingStage('uploading');
+            setBackendProgress(0);
             const config = {
                 onUploadProgress: progressEvent => {
                     const total = progressEvent.total || 1;
@@ -37,15 +92,26 @@ const Proxeiro = () => {
                 }
             }
             const response = await axios.post(url, formData, config);
-
-            // Add a cache-busting query so replacing an existing filename shows the new video.
-            const fileUrl = `http://localhost:8000${response.data.file_url}?t=${Date.now()}`;
-            setUploadedFileURL(fileUrl);
             setUploadProgres(100);
-            console.log(response.data);
-            console.log(response.data.file_url);
+            const jobId = response?.data?.job_id;
+
+            if (jobId) {
+                setProcessingStage('queued');
+                await pollUploadStatus(jobId);
+                setBackendProgress(100);
+                setProcessingStage('completed');
+            } else if (response?.data?.file_url) {
+                // Backward-compatible path for synchronous backend responses.
+                const fileUrl = `http://localhost:8000${response.data.file_url}?t=${Date.now()}`;
+                setUploadedFileURL(fileUrl);
+                setBackendProgress(100);
+                setProcessingStage('completed');
+            } else {
+                throw new Error('Unexpected backend response. Missing job_id or file_url.');
+            }
         }catch(error){
-            setUploadError('Upload failed. Check that the FastAPI backend is running and try again.');
+            setUploadError(error?.message || 'Upload failed. Check that the FastAPI backend is running and try again.');
+            setProcessingStage('failed');
             if(error.response){
                 console.log(error.response.data);
                 console.log(error.response.status);
@@ -69,6 +135,7 @@ const Proxeiro = () => {
         setFile(nextFile);
         setUploadError('');
         setUploadProgres(0);
+        setBackendProgress(0);
 
         if (uploadedFileURL) {
             uploadVideo(nextFile);
@@ -102,6 +169,7 @@ const Proxeiro = () => {
         setFile(droppedFile);
         setUploadError('');
         setUploadProgres(0);
+        setBackendProgress(0);
     };
 
     //async function handleSubmit(event){
@@ -142,6 +210,8 @@ const Proxeiro = () => {
         },
         ],
     };
+
+    const displayProgress = processingStage === 'uploading' ? uploadProgress : backendProgress;
 
     const handlePlayerReady = (player) => {
         playerRef.current = player;
@@ -196,16 +266,19 @@ const Proxeiro = () => {
                                 </div>
                                 <button className="upload-submit" type="submit" disabled={!file || isUploading}>
                                     {isUploading ? <LoaderCircle className="spin" size={18} /> : <ChevronRight size={18} />}
-                                    <span>{isUploading ? 'Uploading...' : 'Start analysis'}</span>
+                                    <span>{isUploading ? 'Working...' : 'Start analysis'}</span>
                                 </button>
                             </div>
 
                             <div className="upload-progress-block">
                                 <div className="upload-progress-labels">
-                                    <span>Upload progress</span>
-                                    <span>{uploadProgress}%</span>
+                                    <span>{processingStage === 'uploading' ? 'Upload progress' : 'Backend progress'}</span>
+                                    <span>{displayProgress}%</span>
                                 </div>
-                                <progress value={uploadProgress} max="100"></progress>
+                                <progress value={displayProgress} max="100"></progress>
+                                {isUploading && processingStage !== 'uploading' ? (
+                                    <p className="upload-file-label">{stageLabel(processingStage)}</p>
+                                ) : null}
                             </div>
 
                             {uploadError ? <p className="upload-error">{uploadError}</p> : null}

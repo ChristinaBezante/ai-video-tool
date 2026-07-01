@@ -1,10 +1,14 @@
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, UploadFile, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from video_processing import extract_audio
 from video_processing import extract_frames
 from whisper import transcribe_audio
+import json
+import uuid
+from bert import create_embeddings
+from frame_embeddings import create_frame_embeddings
 
 # Runtime folder layout used by this API:
 # - uploads/: original uploaded video files
@@ -12,7 +16,7 @@ from whisper import transcribe_audio
 # - frames/: extracted image frames grouped by video stem
 #
 # Using Path(__file__).parent keeps paths stable regardless of where the
-# process is started from (important for local dev vs container runs).
+# process is started from.
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -62,10 +66,155 @@ app.mount(
      name="frames"
 ) 
 
+JOBS = {}
+
+
+def _compact_transcript_for_json(transcript):
+    """Persist only timestamped text segments instead of raw chunk metadata."""
+    if isinstance(transcript, dict):
+        data = transcript
+    elif hasattr(transcript, "model_dump"):
+        data = transcript.model_dump()
+    elif hasattr(transcript, "dict"):
+        data = transcript.dict()
+    elif hasattr(transcript, "__dict__"):
+        data = vars(transcript)
+    else:
+        data = {}
+
+    def to_dict(item):
+        if isinstance(item, dict):
+            return item
+        if hasattr(item, "model_dump"):
+            return item.model_dump()
+        if hasattr(item, "dict"):
+            return item.dict()
+        if hasattr(item, "__dict__"):
+            return vars(item)
+        return None
+
+    raw_chunks = data.get("segments") or data.get("chunks") or []
+    segments = []
+
+    for item in raw_chunks:
+        item_dict = to_dict(item)
+        if not isinstance(item_dict, dict):
+            continue
+
+        start = item_dict.get("start")
+        end = item_dict.get("end")
+        timestamp = item_dict.get("timestamp")
+
+        if isinstance(timestamp, (list, tuple)) and len(timestamp) == 2:
+            if start is None:
+                start = timestamp[0]
+            if end is None:
+                end = timestamp[1]
+
+        segments.append(
+            {
+                "start": start,
+                "end": end,
+                "text": (item_dict.get("text") or "").strip(),
+            }
+        )
+
+    return {"segments": segments}
+
+
+def _set_job_status(job_id, status=None, stage=None, progress=None, error=None, result=None):
+    job = JOBS.get(job_id, {})
+    if status is not None:
+        job["status"] = status
+    if stage is not None:
+        job["stage"] = stage
+    if progress is not None:
+        job["progress"] = int(max(0, min(100, progress)))
+    if error is not None:
+        job["error"] = error
+    if result is not None:
+        job["result"] = result
+    JOBS[job_id] = job
+
+
+def _process_upload_job(
+    job_id,
+    filename,
+    video_path,
+    frame_interval_sec,
+    frame_strategy,
+    scene_threshold,
+    keyframes_only,
+    frame_max_width,
+):
+    try:
+        video_path = Path(video_path)
+        _set_job_status(job_id, status="processing", stage="extracting_audio", progress=20)
+
+        output_audio = AUDIO_DIR / f"{video_path.stem}.wav"
+        extract_audio(video_path, output_audio)
+
+        _set_job_status(job_id, status="processing", stage="transcribing", progress=50)
+        transcript = transcribe_audio(str(output_audio))
+
+        transcript_path = AUDIO_DIR / f"{video_path.stem}.json"
+        transcript_for_json = _compact_transcript_for_json(transcript)
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            json.dump(transcript_for_json, f, indent=2, ensure_ascii=False)
+
+        _set_job_status(job_id, status="processing", stage="creating_embeddings", progress=65)
+        embeddings = create_embeddings(str(transcript_path))
+        embedding_path = AUDIO_DIR / f"{video_path.stem}_embeddings.json"
+        with open(embedding_path, "w", encoding="utf-8") as f:
+            json.dump(embeddings, f, indent=2, ensure_ascii=False)
+
+        _set_job_status(job_id, status="processing", stage="extracting_frames", progress=80)
+        output_frames_dir = FRAMES_DIR / video_path.stem
+        frame_count = extract_frames(
+            video_path,
+            output_frames_dir,
+            interval_seconds=frame_interval_sec,
+            extraction_mode=frame_strategy,
+            scene_threshold=scene_threshold,
+            keyframes_only=keyframes_only,
+            max_width=frame_max_width,
+        )
+
+        _set_job_status(job_id, status="processing", stage="creating_frame_embeddings", progress=90)
+        frame_embeddings = create_frame_embeddings(str(output_frames_dir))
+        frame_embedding_path = output_frames_dir / f"{video_path.stem}_frame_embeddings.json"
+        with open(frame_embedding_path, "w", encoding="utf-8") as f:
+            json.dump(frame_embeddings, f, indent=2, ensure_ascii=False)
+
+        result = {
+            "filename": filename,
+            "file_url": f"/uploads/{filename}",
+            "audio_url": f"/audio/{video_path.stem}.wav",
+            "transcript_url": f"/audio/{video_path.stem}.json",
+            "embeddings_url": f"/audio/{video_path.stem}_embeddings.json",
+            "frame_embeddings_url": f"/frames/{video_path.stem}/{video_path.stem}_frame_embeddings.json",
+            "transcript": transcript,
+            "frame_count": frame_count,
+            "frames_url_prefix": f"/frames/{video_path.stem}/",
+            "frame_settings": {
+                "interval_seconds": frame_interval_sec,
+                "strategy": frame_strategy,
+                "scene_threshold": scene_threshold,
+                "keyframes_only": keyframes_only,
+                "max_width": frame_max_width,
+            },
+        }
+        _set_job_status(job_id, status="completed", stage="completed", progress=100, result=result)
+    except Exception as e:
+        _set_job_status(job_id, status="failed", stage="failed", progress=100, error=str(e))
+
 @app.post('/uploadfile/')
 async def create_upload_file(
+    background_tasks: BackgroundTasks,
     file_upload: UploadFile,
     frame_interval_sec: float = 5.0,
+    frame_strategy: str = "scene",
+    scene_threshold: float = 0.35,
     keyframes_only: bool = True,
     frame_max_width: int = 640,
 ):
@@ -77,59 +226,68 @@ async def create_upload_file(
     3) Extract frames into frames/<video_stem>/frameXXXXXX.jpg
     4) Return relative URLs consumed by the frontend
 
-    frame_interval_sec controls temporal sampling density.
+    frame_interval_sec controls temporal sampling density in interval mode.
+    frame_strategy selects extraction style: "scene" or "interval".
+    scene_threshold controls FFmpeg scene sensitivity in scene mode.
     keyframes_only trades timing uniformity for speed.
     frame_max_width limits frame width to reduce CPU/disk cost.
     """
 
-    # FastAPI UploadFile gives a file-like object; we read bytes once and store
-    # the exact uploaded payload as-is inside UPLOAD_DIR.
-    data = await file_upload.read()
+    if not file_upload.filename:
+        raise HTTPException(status_code=400, detail="Missing uploaded filename")
+
+    # Stream upload to disk to avoid reading very large files into memory.
     save_to = UPLOAD_DIR / file_upload.filename
     print("UPLOAD_DIR:", UPLOAD_DIR)
     print("Saving to:", save_to)
     with open(save_to, 'wb') as f:
-        f.write(data)
+        while True:
+            chunk = await file_upload.read(1024 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
 
-    # video_path is the single source file used by both processing stages.
-    video_path = save_to
+    job_id = str(uuid.uuid4())
+    JOBS[job_id] = {
+        "job_id": job_id,
+        "status": "processing",
+        "stage": "queued",
+        "progress": 5,
+        "error": None,
+        "result": None,
+    }
 
-    # Keep naming consistent: demo.mp4 -> audio/demo.wav.
-    output_audio = AUDIO_DIR / f"{save_to.stem}.wav"
-    extract_audio(video_path, output_audio)
-
-    transcript = transcribe_audio(str(output_audio))
-
-    # Save transcript JSON next to the audio file
-    transcript_path = AUDIO_DIR / f"{save_to.stem}.json"
-
-    with open(transcript_path, "w", encoding="utf-8") as f:
-        json.dump(transcript, f, indent=2, ensure_ascii=False)
-
-    # Frames are grouped per upload stem to avoid collisions between videos.
-    output_frames_dir = FRAMES_DIR / save_to.stem
-    frame_count = extract_frames(
-        video_path,
-        output_frames_dir,
-        interval_seconds=frame_interval_sec,
-        keyframes_only=keyframes_only,
-        max_width=frame_max_width,
+    background_tasks.add_task(
+        _process_upload_job,
+        job_id,
+        file_upload.filename,
+        str(save_to),
+        frame_interval_sec,
+        frame_strategy,
+        scene_threshold,
+        keyframes_only,
+        frame_max_width,
     )
 
-    print("File exists:", save_to.exists())
-    # API returns relative URLs. Frontend prefixes with backend base URL,
-    # for example: http://localhost:8000 + file_url.
     return {
-        "filename": file_upload.filename,
-        "file_url": f"/uploads/{file_upload.filename}",
-        "audio_url": f"/audio/{save_to.stem}.wav",
-        "transcript_url": f"/audio/{save_to.stem}.json",
-        "transcript": transcript,
-        "frame_count": frame_count,
-        "frames_url_prefix": f"/frames/{save_to.stem}/",
-        "frame_settings": {
-            "interval_seconds": frame_interval_sec,
-            "keyframes_only": keyframes_only,
-            "max_width": frame_max_width,
-        },
+        "job_id": job_id,
+        "status": "processing",
+        "stage": "queued",
+        "progress": 5,
+        "status_url": f"/upload-status/{job_id}",
+    }
+
+
+@app.get('/upload-status/{job_id}')
+async def get_upload_status(job_id: str):
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job.get("job_id"),
+        "status": job.get("status"),
+        "stage": job.get("stage"),
+        "progress": job.get("progress", 0),
+        "error": job.get("error"),
+        "result": job.get("result"),
     }

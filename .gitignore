@@ -3,3 +3,4 @@ backend/audio/
 backend/uploads/
 frontend/public/uploads/
 backend/.env
+backend/qdrant_data/

@@ -9,6 +9,10 @@ import json
 import uuid
 from bert import create_embeddings
 from frame_embeddings import create_frame_embeddings
+from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings
+
+from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION
+
 
 # Runtime folder layout used by this API:
 # - uploads/: original uploaded video files
@@ -32,6 +36,8 @@ FRAMES_DIR = BASE_DIR / "frames"
 FRAMES_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI()
+
+ensure_collections()  # Create Qdrant collections if they don't exist
 
 # CORS is open here to simplify local frontend/backend integration.
 # In production this should be restricted to known frontend origins.
@@ -65,6 +71,13 @@ app.mount(
      StaticFiles(directory=str(FRAMES_DIR)),
      name="frames"
 ) 
+
+@app.get('/debug/qdrant-counts')
+async def debug_qdrant_counts():
+    return {
+        "text_points": client.count(collection_name=TEXT_COLLECTION).count,
+        "frame_points": client.count(collection_name=FRAME_COLLECTION).count,
+    }
 
 JOBS = {}
 
@@ -164,6 +177,9 @@ def _process_upload_job(
 
         _set_job_status(job_id, status="processing", stage="creating_embeddings", progress=65)
         embeddings = create_embeddings(str(transcript_path))
+
+        store_text_embeddings(video_path.stem, embeddings)
+
         embedding_path = AUDIO_DIR / f"{video_path.stem}_embeddings.json"
         with open(embedding_path, "w", encoding="utf-8") as f:
             json.dump(embeddings, f, indent=2, ensure_ascii=False)
@@ -182,6 +198,9 @@ def _process_upload_job(
 
         _set_job_status(job_id, status="processing", stage="creating_frame_embeddings", progress=90)
         frame_embeddings = create_frame_embeddings(str(output_frames_dir))
+
+        store_frame_embeddings(video_path.stem, frame_embeddings)
+
         frame_embedding_path = output_frames_dir / f"{video_path.stem}_frame_embeddings.json"
         with open(frame_embedding_path, "w", encoding="utf-8") as f:
             json.dump(frame_embeddings, f, indent=2, ensure_ascii=False)

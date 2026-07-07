@@ -1,6 +1,8 @@
 [
   {
     "frame": "frame000001.jpg",
+    "timestamp": 1.36667,
+    "timestamp_formatted": "00:01",
     "embedding": [
       0.004872261546552181,
       -0.027173619717359543,
@@ -518,6 +520,8 @@
   },
   {
     "frame": "frame000002.jpg",
+    "timestamp": 39.25,
+    "timestamp_formatted": "00:39",
     "embedding": [
       -0.05098044499754906,
       0.024149015545845032,
@@ -1035,6 +1039,8 @@
   },
   {
     "frame": "frame000003.jpg",
+    "timestamp": 213.333,
+    "timestamp_formatted": "03:33",
     "embedding": [
       -0.014577128924429417,
       -0.0037499323952943087,
@@ -1552,6 +1558,8 @@
   },
   {
     "frame": "frame000004.jpg",
+    "timestamp": 283.167,
+    "timestamp_formatted": "04:43",
     "embedding": [
       -0.04752456024289131,
       -0.028780143707990646,
@@ -2069,6 +2077,8 @@
   },
   {
     "frame": "frame000005.jpg",
+    "timestamp": 336.483,
+    "timestamp_formatted": "05:36",
     "embedding": [
       0.013408959843218327,
       0.01012298185378313,

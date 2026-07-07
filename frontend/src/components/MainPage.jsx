@@ -198,7 +198,7 @@ function MainPage() {
             <div className="hero-float-wrapper">
               <div className="hero-glow-orb"></div>
               <img
-                src="/uploads/scissors-cutting.png"
+                src="backend/uploads/scissors-cutting.png"
                 alt="Scissors cutting video frame"
                 className="hero-float-image"
               />

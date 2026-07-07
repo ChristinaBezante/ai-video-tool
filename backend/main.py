@@ -4,10 +4,10 @@ from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from video_processing import extract_audio
 from video_processing import extract_frames
-from whisper import transcribe_audio
+# from whisper import transcribe_audio
 import json
 import uuid
-from bert import create_embeddings
+# from bert import create_embeddings
 from frame_embeddings import create_frame_embeddings
 from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings
 
@@ -167,43 +167,52 @@ def _process_upload_job(
         output_audio = AUDIO_DIR / f"{video_path.stem}.wav"
         extract_audio(video_path, output_audio)
 
-        _set_job_status(job_id, status="processing", stage="transcribing", progress=50)
-        transcript = transcribe_audio(str(output_audio))
+        # _set_job_status(job_id, status="processing", stage="transcribing", progress=50)
+        # transcript = transcribe_audio(str(output_audio))
+        #
+        # transcript_path = AUDIO_DIR / f"{video_path.stem}.json"
+        # transcript_for_json = _compact_transcript_for_json(transcript)
+        # with open(transcript_path, "w", encoding="utf-8") as f:
+        #     json.dump(transcript_for_json, f, indent=2, ensure_ascii=False)
+        #
+        # _set_job_status(job_id, status="processing", stage="creating_embeddings", progress=65)
+        # embeddings = create_embeddings(str(transcript_path))
+        #
+        # store_text_embeddings(video_path.stem, embeddings)
+        #
+        # embedding_path = AUDIO_DIR / f"{video_path.stem}_embeddings.json"
+        # with open(embedding_path, "w", encoding="utf-8") as f:
+        #     json.dump(embeddings, f, indent=2, ensure_ascii=False)
 
-        transcript_path = AUDIO_DIR / f"{video_path.stem}.json"
-        transcript_for_json = _compact_transcript_for_json(transcript)
-        with open(transcript_path, "w", encoding="utf-8") as f:
-            json.dump(transcript_for_json, f, indent=2, ensure_ascii=False)
+        transcript = None
 
-        _set_job_status(job_id, status="processing", stage="creating_embeddings", progress=65)
-        embeddings = create_embeddings(str(transcript_path))
+        # _set_job_status(job_id, status="processing", stage="extracting_frames", progress=80)
+        # output_frames_dir = FRAMES_DIR / video_path.stem
+        # frame_count, frame_timestamps = extract_frames(
+        #     video_path,
+        #     output_frames_dir,
+        #     interval_seconds=frame_interval_sec,
+        #     extraction_mode=frame_strategy,
+        #     scene_threshold=scene_threshold,
+        #     keyframes_only=keyframes_only,
+        #     max_width=frame_max_width,
+        # )
 
-        store_text_embeddings(video_path.stem, embeddings)
+        # _set_job_status(job_id, status="processing", stage="creating_frame_embeddings", progress=90)
+        # frame_embeddings = create_frame_embeddings(
+        #     str(output_frames_dir),
+        #     timestamps=frame_timestamps,
+        # )
 
-        embedding_path = AUDIO_DIR / f"{video_path.stem}_embeddings.json"
-        with open(embedding_path, "w", encoding="utf-8") as f:
-            json.dump(embeddings, f, indent=2, ensure_ascii=False)
+        # store_frame_embeddings(video_path.stem, frame_embeddings)
 
-        _set_job_status(job_id, status="processing", stage="extracting_frames", progress=80)
-        output_frames_dir = FRAMES_DIR / video_path.stem
-        frame_count = extract_frames(
-            video_path,
-            output_frames_dir,
-            interval_seconds=frame_interval_sec,
-            extraction_mode=frame_strategy,
-            scene_threshold=scene_threshold,
-            keyframes_only=keyframes_only,
-            max_width=frame_max_width,
-        )
+        # frame_embedding_path = output_frames_dir / f"{video_path.stem}_frame_embeddings.json"
+        # with open(frame_embedding_path, "w", encoding="utf-8") as f:
+        #     json.dump(frame_embeddings, f, indent=2, ensure_ascii=False)
 
-        _set_job_status(job_id, status="processing", stage="creating_frame_embeddings", progress=90)
-        frame_embeddings = create_frame_embeddings(str(output_frames_dir))
-
-        store_frame_embeddings(video_path.stem, frame_embeddings)
-
-        frame_embedding_path = output_frames_dir / f"{video_path.stem}_frame_embeddings.json"
-        with open(frame_embedding_path, "w", encoding="utf-8") as f:
-            json.dump(frame_embeddings, f, indent=2, ensure_ascii=False)
+        frame_count = 0
+        frame_timestamps = []
+        frame_embeddings = []
 
         result = {
             "filename": filename,

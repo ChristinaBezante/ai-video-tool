@@ -1,3 +1,4 @@
+import re
 import ffmpeg
 from pathlib import Path
 
@@ -11,11 +12,7 @@ def extract_audio(video_path, output_audio):
     try:
         (
             ffmpeg.input(str(video_path))
-            # acodec: PCM signed 16-bit little-endian
-            # ac: mono channel
-            # ar: sample rate (Hz)
             .output(str(output_audio), acodec="pcm_s16le", ac=1, ar="16000")
-            # overwrite_output avoids interactive ffmpeg prompts on re-uploads.
             .overwrite_output()
             .run(capture_stdout=True, capture_stderr=True)
         )
@@ -23,6 +20,9 @@ def extract_audio(video_path, output_audio):
     except ffmpeg.Error as e:
         stderr = e.stderr.decode(errors="replace") if e.stderr else str(e)
         raise RuntimeError(f"Audio extraction failed: {stderr}") from e
+
+
+_PTS_TIME_RE = re.compile(r"pts_time:([0-9.]+)")
 
 
 def extract_frames(
@@ -43,8 +43,9 @@ def extract_frames(
     3) Apply frame-selection filter:
        - scene mode: keep frames where FFmpeg scene score exceeds threshold
        - interval mode: fps sampling based on interval_seconds
-    4) Optionally resize frames to max_width
-    5) Save sequential images: frame000001.jpg, frame000002.jpg, ...
+    4) Log each selected frame's true PTS timestamp via showinfo (stderr)
+    5) Optionally resize frames to max_width
+    6) Save sequential images: frame000001.jpg, frame000002.jpg, ...
 
     extraction_mode: "scene" or "interval".
     scene_threshold: FFmpeg scene-change threshold (0.0..1.0), used in scene mode.
@@ -53,6 +54,10 @@ def extract_frames(
         timestamps are less uniform than full decode.
     max_width: if > 0, constrain output width while preserving aspect ratio.
     quality: JPEG q:v quality (2 best quality/larger files .. 31 lowest quality).
+
+    Returns:
+        (frame_count, timestamps) where timestamps is a dict mapping
+        "frame000001.jpg" -> seconds (float), in extraction order.
     """
     try:
         output_dir = Path(output_dir)
@@ -65,11 +70,8 @@ def extract_frames(
 
         input_kwargs = {}
         if keyframes_only:
-            # skip_frame=nokey tells decoder to skip non-key frames early.
-            # This usually gives a major speed-up for long GOP videos.
             input_kwargs["skip_frame"] = "nokey"
 
-        # Build ffmpeg input stream from the on-disk video path.
         stream = ffmpeg.input(str(video_path), **input_kwargs)
 
         safe_mode = str(extraction_mode or "scene").strip().lower()
@@ -79,42 +81,57 @@ def extract_frames(
         vf_parts = []
         if safe_mode == "scene":
             safe_scene_threshold = min(max(float(scene_threshold), 0.0), 1.0)
-            # Keep only frames with significant visual difference.
             vf_parts.append(f"select='gt(scene\\,{safe_scene_threshold:.3f})'")
         else:
-            # Prevent invalid/zero fps math when interval is <= 0.
             safe_interval = max(float(interval_seconds), 0.1)
             vf_parts.append(f"fps=1/{safe_interval}")
 
+        # showinfo logs pts_time for every frame that survives selection,
+        # in output order — this is how we recover true timestamps below.
+        vf_parts.append("showinfo")
+
         if max_width and int(max_width) > 0:
-            # scale=min(max_width, iw):-2 => do not upscale, preserve aspect,
-            # and force an even height value required by many codecs/pipelines.
             vf_parts.append(f"scale='min({int(max_width)},iw)':-2")
 
         output_pattern = output_dir / "frame%06d.jpg"
 
-        (
+        process = (
             stream.output(
                 str(output_pattern),
                 vf=",".join(vf_parts),
                 format="image2",
-                # vfr writes frames at selected timestamps without duplicating
-                # frames to match a fixed output frame rate.
                 vsync="vfr",
                 **{"q:v": max(2, min(int(quality), 31))},
                 start_number=1,
             )
             .overwrite_output()
-            # threads=0 lets ffmpeg auto-select thread count for this machine.
-            # loglevel=error keeps logs concise while preserving failures.
-            .global_args("-threads", "0", "-loglevel", "error")
-            .run(capture_stdout=True, capture_stderr=True)
+            # loglevel must be "info" (not "error") or showinfo's pts_time
+            # lines get suppressed and we lose the timestamp data entirely.
+            .global_args("-threads", "0", "-loglevel", "info")
         )
 
-        # Count generated files so caller can report extraction volume.
-        frame_count = len(list(output_dir.glob("frame*.jpg")))
+        result = process.run(capture_stdout=True, capture_stderr=True)
+        stderr_text = result[1].decode(errors="replace") if result[1] else ""
+
+        pts_times = [float(m) for m in _PTS_TIME_RE.findall(stderr_text)]
+
+        frame_files = sorted(output_dir.glob("frame*.jpg"))
+        frame_count = len(frame_files)
+
+        if len(pts_times) != frame_count:
+            # Mismatch shouldn't normally happen, but don't silently produce
+            # wrong pairings — fall back to None rather than misalign frames.
+            print(
+                f"Warning: showinfo timestamp count ({len(pts_times)}) != "
+                f"frame count ({frame_count}); timestamps may be incomplete."
+            )
+
+        timestamps = {}
+        for i, frame_file in enumerate(frame_files):
+            timestamps[frame_file.name] = pts_times[i] if i < len(pts_times) else None
+
         print(f"Frames extracted successfully to {output_dir} (count={frame_count})")
-        return frame_count
+        return frame_count, timestamps
     except ValueError as e:
         raise RuntimeError(f"Frame extraction failed: {e}") from e
     except ffmpeg.Error as e:

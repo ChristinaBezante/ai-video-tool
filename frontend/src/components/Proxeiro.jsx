@@ -30,8 +30,8 @@ const Proxeiro = () => {
 
     const stageLabel = (stage) => {
         if (stage === 'extracting_audio') return 'Processing: extracting audio...';
-        if (stage === 'transcribing') return 'Processing: transcribing audio...';
-        if (stage === 'extracting_frames') return 'Processing: extracting frames...';
+        //if (stage === 'transcribing') return 'Processing: transcribing audio...';
+        //if (stage === 'extracting_frames') return 'Processing: extracting frames...';
         if (stage === 'queued') return 'Processing queued...';
         if (stage === 'completed') return 'Processing completed.';
         if (stage === 'failed') return 'Processing failed.';

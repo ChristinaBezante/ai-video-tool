@@ -16,11 +16,37 @@ def _get_model():
     return _model, _processor
 
 
-def create_frame_embeddings(frames_dir: str, batch_size: int = 8) -> list[dict]:
+def _format_timestamp(seconds: float | None) -> str | None:
+    """Convert seconds to MM:SS format (e.g. 125.43 -> '02:05')."""
+    if seconds is None:
+        return None
+    total_seconds = int(seconds)
+    minutes, secs = divmod(total_seconds, 60)
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def create_frame_embeddings(
+    frames_dir: str,
+    batch_size: int = 8,
+    frame_interval_sec: float | None = None,
+    timestamps: dict[str, float] | None = None,
+) -> list[dict]:
     """Embed all JPEG frames in frames_dir using CLIP (batched for speed).
 
+    Args:
+        frames_dir: directory containing frame*.jpg files.
+        batch_size: batch size for CLIP inference.
+        frame_interval_sec: if provided (and `timestamps` is not), timestamp
+            for frame N is computed as N * frame_interval_sec. Use this for
+            fixed-interval extraction.
+        timestamps: optional explicit mapping of frame filename -> timestamp
+            (seconds). Use this for scene-detection / keyframe extraction,
+            where spacing isn't uniform. Takes precedence over
+            frame_interval_sec.
+
     Returns a list of dicts:
-        { "frame": "frame000001.jpg", "embedding": [...] }
+        { "frame": "frame000001.jpg", "timestamp": 12.0,
+          "timestamp_formatted": "00:12", "embedding": [...] }
     """
     import torch  # noqa: PLC0415
     from PIL import Image  # noqa: PLC0415
@@ -45,12 +71,23 @@ def create_frame_embeddings(frames_dir: str, batch_size: int = 8) -> list[dict]:
             embeddings = model.visual_projection(pooled)  # (N, projection_dim=512)
             embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
 
-        for path, emb in zip(batch_paths, embeddings):
+        for i, (path, emb) in enumerate(zip(batch_paths, embeddings)):
+            frame_index = batch_start + i
+
+            if timestamps is not None:
+                ts = timestamps.get(path.name)
+            elif frame_interval_sec is not None:
+                ts = round(frame_index * frame_interval_sec, 3)
+            else:
+                ts = None
+
             # Ensure embedding is always a flat 1-D list, never [[...]].
             flat = emb.cpu().flatten().tolist()
             results.append(
                 {
                     "frame": path.name,
+                    "timestamp": ts,
+                    "timestamp_formatted": _format_timestamp(ts),
                     "embedding": flat,
                 }
             )

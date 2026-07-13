@@ -4,9 +4,9 @@
 }
 
 .chat-input-outer {
-  padding: 0.28rem;
+  padding: 0.22rem;
   background: linear-gradient(135deg, rgba(124, 77, 255, 0.48), rgba(255, 79, 164, 0.45));
-  border-radius: 999px;
+  border-radius: 20px;
   font-family: inherit;
   transform-origin: bottom;
   animation: chat 0.4s ease;
@@ -15,11 +15,11 @@
 .chat-input-inner {
   position: relative;
   flex-shrink: 0;
-  min-height: 56px;
-  padding-right: 3.3rem;
+  min-height: 52px;
+  padding-right: 3.2rem;
   padding-left: 2.9rem;
   background: rgba(41, 46, 59, 0.96);
-  border-radius: 999px;
+  border-radius: 18px;
   overflow: hidden;
   border: 1px solid rgba(111, 127, 168, 0.38);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -34,17 +34,18 @@
   display: block;
   width: 100%;
   max-height: 140px;
-  padding: 0.95rem 3.5rem 0.95rem 0;
+  padding: 0.9rem 0;
   background: transparent;
   color: #e9edf9;
   caret-color: #e9edf9;
   border: none;
-  border-radius: 999px;
+  border-radius: 0;
   resize: none;
   outline: none;
   font: inherit;
   font-size: 0.96rem;
   box-sizing: border-box;
+  line-height: 1.5;
 }
 
 .chat-textarea::placeholder {

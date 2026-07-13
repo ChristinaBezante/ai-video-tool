@@ -198,10 +198,9 @@ const Proxeiro = () => {
         loop: true,
         controls: true,
         responsive: true,
-        fluid: true,  //true to take the parent div width and height
+        fill: true,   // fill parent container dimensions
         backgroundColor: "black",
         display: "block",
-        response: true,  //for the breakpoints
         forward:5,
         sources: [
         {

@@ -4,6 +4,33 @@ import { useEffect, useRef, useState } from 'react';
 import { Zap, Shield, Users, Star } from 'lucide-react';
 import { useLocation, useNavigate } from "react-router-dom";
 
+const insightData = {
+  speed:    { label: 'How fast?',      text: 'Ask "what happens at minute 34?" and get an answer before you\'d even find the scrubber. No buffering, no waiting — just the moment you need.' },
+  privacy:  { label: 'Your data',      text: 'We never see your videos. Everything runs locally on your machine, so sensitive footage stays exactly where you left it.' },
+  teams:    { label: 'Built for you',  text: 'Whether it\'s two people or twenty, everyone can search the same video and jump straight to the part that matters to them.' },
+  footage:  { label: 'No more scrubbing', text: 'We built this because we were tired of dragging a timeline slider hoping we\'d land on the right scene. There\'s a better way.' },
+  creators: { label: 'Made by creators', text: 'Christina and Enterisa started this as a uni project and couldn\'t stop. If you make videos for a living, this one\'s for you.' },
+};
+
+function InsightSpan({ word, active, onToggle }) {
+  return (
+    <span
+      className={`insight-word${active ? ' insight-word-open' : ''}`}
+      role="button"
+      tabIndex={0}
+      onClick={(e) => { e.stopPropagation(); onToggle(word); }}
+      onKeyDown={(e) => e.key === 'Enter' && onToggle(word)}
+    >
+      {word}
+      {active && (
+        <span className="insight-tooltip" role="tooltip">
+          <span className="insight-tooltip-text">{insightData[word].text}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 function MainPage() {
 
   const navigate = useNavigate()
@@ -61,6 +88,16 @@ function MainPage() {
   const cursorRef = useRef(null);
   const stepFillRef = useRef(null);
   const [tsReady, setTsReady] = useState(false);
+  const [activeValue, setActiveValue] = useState(0);
+  const [activeInsight, setActiveInsight] = useState(null);
+  const toggleInsight = (word) => setActiveInsight(prev => prev === word ? null : word);
+
+  useEffect(() => {
+    if (!activeInsight) return;
+    const close = () => setActiveInsight(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [activeInsight]);
 
   // rAF-based scroll progress — reads from the actual scroll container
   useEffect(() => {
@@ -144,6 +181,52 @@ function MainPage() {
     }
   };
 
+  const coreValues = [
+    {
+      kicker: '01', Icon: Zap, heading: 'Speed first',
+      body: 'Quick analysis and instant access keep the workflow moving.',
+      graphicType: 'speed',
+    },
+    {
+      kicker: '02', Icon: Shield, heading: 'Your content, your control',
+      body: 'Secure processing and private uploads make the product feel trustworthy.',
+      graphicType: 'privacy',
+    },
+    {
+      kicker: '03', Icon: Users, heading: 'Built for teams',
+      body: 'Designed to work equally well for solo creators and larger video teams.',
+      graphicType: 'teams',
+    },
+  ];
+
+  const renderGraphic = (type) => {
+    if (type === 'speed') return (
+      <div className="cvs-speed-graphic">
+        <div className="cvs-speed-label">Analyzing<span className="cvs-speed-dots">...</span></div>
+        <div className="cvs-bar-track">
+          <div className="cvs-bar-fill" />
+        </div>
+      </div>
+    );
+    if (type === 'privacy') return (
+      <div className="cvs-lock-graphic">
+        <Shield className="cvs-lock-svg" size={26} />
+        <span className="cvs-encrypted-badge">Encrypted &#10003;</span>
+      </div>
+    );
+    if (type === 'teams') return (
+      <div className="cvs-team-graphic">
+        <div className="cvs-team-avatars">
+          {[['CB', '0s'], ['EG', '0.14s'], ['+4', '0.28s']].map(([label, delay]) => (
+            <div key={label} className="cvs-team-avatar" style={{ '--delay': delay }}>{label}</div>
+          ))}
+        </div>
+        <span className="cvs-team-label">2 collaborators online</span>
+      </div>
+    );
+    return null;
+  };
+
   const navToUpload = (event) => {
     event.preventDefault()
     navigate("/upload")
@@ -198,7 +281,7 @@ function MainPage() {
             <div className="hero-float-wrapper">
               <div className="hero-glow-orb"></div>
               <img
-                src="backend/uploads/scissors-cutting.png"
+                src="/uploads/scissors-cutting.png"
                 alt="Scissors cutting video frame"
                 className="hero-float-image"
               />
@@ -249,10 +332,18 @@ function MainPage() {
                 About <span className="feature-heading-accent">Us</span>
               </h2>
               <p>
-                Ctrl + Vid combines speed, clarity, and privacy into a video workflow that feels
-                effortless and consistent with the rest of the site. We built it for teams who are
-                tired of scrubbing through footage, and for creators who want their video data to be
-                immediately useful, not just stored.
+                Ctrl + Vid combines{' '}
+                <InsightSpan word="speed" active={activeInsight === 'speed'} onToggle={toggleInsight} />,{' '}
+                clarity, and{' '}
+                <InsightSpan word="privacy" active={activeInsight === 'privacy'} onToggle={toggleInsight} />{' '}
+                into a video workflow that feels effortless and consistent with the rest of the
+                site. We built it for{' '}
+                <InsightSpan word="teams" active={activeInsight === 'teams'} onToggle={toggleInsight} />{' '}
+                who are tired of scrubbing through{' '}
+                <InsightSpan word="footage" active={activeInsight === 'footage'} onToggle={toggleInsight} />,{' '}
+                and for{' '}
+                <InsightSpan word="creators" active={activeInsight === 'creators'} onToggle={toggleInsight} />{' '}
+                who want their video data to be immediately useful, not just stored.
               </p>
               <p>
                 Every part of the experience is designed to make video easier to explore, share,
@@ -282,49 +373,36 @@ function MainPage() {
               </div>
             </div>
             <div className="about-card about-values-card reveal reveal-delay-2">
-              <p className="about-values-eyebrow">Core values</p>
+              {/* Shifting glow overlays — opacity driven by activeValue */}
+              <div className="cvs-glow cvs-glow-pink" style={{ opacity: activeValue === 0 ? 0.9 : activeValue === 1 ? 0.4 : 0.08 }} />
+              <div className="cvs-glow cvs-glow-purple" style={{ opacity: activeValue === 2 ? 0.9 : activeValue === 1 ? 0.4 : 0.08 }} />
+
               <div className="about-values-stack">
-                <article className="about-value-row">
-                  <span className="about-value-rail" aria-hidden="true">
-                    <span className="about-value-dot" />
-                  </span>
-                  <div className="about-value-content">
-                    <span className="about-value-kicker">01</span>
-                    <div className="about-value-heading">
-                      <Zap className="about-value-svg" />
-                      <h3>Speed first</h3>
+                {coreValues.map(({ kicker, Icon, heading, body, graphicType }, i) => (
+                  <article
+                    key={i}
+                    className={`about-value-row${i === activeValue ? ' cvs-active' : ''}`}
+                    onClick={() => setActiveValue(i)}
+                    onMouseEnter={() => setActiveValue(i)}
+                  >
+                    <span className="about-value-rail" aria-hidden="true">
+                      <span className="about-value-dot" />
+                    </span>
+                    <div className="about-value-content">
+                      <span className="about-value-kicker">{kicker}</span>
+                      <div className="about-value-heading">
+                        <Icon className="about-value-svg" size={18} />
+                        <h3>{heading}</h3>
+                      </div>
+                      <p>{body}</p>
+                      <div className={`cvs-graphic${i === activeValue ? ' cvs-graphic-visible' : ''}`}>
+                        {i === activeValue && (
+                          <div key={activeValue}>{renderGraphic(graphicType)}</div>
+                        )}
+                      </div>
                     </div>
-                    <p>Quick analysis and instant access keep the workflow moving.</p>
-                  </div>
-                </article>
-
-                <article className="about-value-row">
-                  <span className="about-value-rail" aria-hidden="true">
-                    <span className="about-value-dot" />
-                  </span>
-                  <div className="about-value-content">
-                    <span className="about-value-kicker">02</span>
-                    <div className="about-value-heading">
-                      <Shield className="about-value-svg" />
-                      <h3>Your content, your control</h3>
-                    </div>
-                    <p>Secure processing and private uploads make the product feel trustworthy.</p>
-                  </div>
-                </article>
-
-                <article className="about-value-row about-value-row-highlight">
-                  <span className="about-value-rail" aria-hidden="true">
-                    <span className="about-value-dot" />
-                  </span>
-                  <div className="about-value-content">
-                    <span className="about-value-kicker">03</span>
-                    <div className="about-value-heading">
-                      <Users className="about-value-svg" />
-                      <h3>Built for teams</h3>
-                    </div>
-                    <p>Designed to work equally well for solo creators and larger video teams.</p>
-                  </div>
-                </article>
+                  </article>
+                ))}
               </div>
             </div>
           </div>

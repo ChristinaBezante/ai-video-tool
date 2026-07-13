@@ -2,3 +2,9 @@ venv
 backend/audio/
 backend/.env
 backend/qdrant_data/
+backend/uploads/
+backend/frames/
+backend/qdrant_storage/
+backend/__pycache__/
+**/__pycache__/
+*.pyc

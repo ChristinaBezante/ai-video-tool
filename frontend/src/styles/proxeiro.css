@@ -278,20 +278,19 @@
 .video-container {
   flex: 1;
   min-width: 0;
-  min-height: 420px;
+  min-height: 0;
   display: flex;
   overflow: hidden;
   border-radius: 24px;
   background: rgba(0, 0, 0, 0.45);
 }
 
-.upload-grid-loaded .video-container {
-  min-height: 0;
-}
-
-.video-container > * {
+.video-container > *,
+.video-container [data-vjs-player],
+.video-container [data-vjs-player] > div {
   width: 100%;
   height: 100%;
+  position: relative;
 }
 
 .upload-lower-panel {

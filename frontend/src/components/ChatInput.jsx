@@ -1,5 +1,5 @@
 import useAutosize from '../hooks/useAutosize';
-import { Send, Plus, Mic } from 'lucide-react';
+import { Send, Plus } from 'lucide-react';
 import '../styles/chatinput.css';
 
 function ChatInput({ newMessage, isLoading, setNewMessage, submitNewMessage }) {
@@ -29,9 +29,6 @@ function ChatInput({ newMessage, isLoading, setNewMessage, submitNewMessage }) {
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
           />
-          <button className="chat-aux-button chat-aux-right" type="button" aria-label="Voice input">
-            <Mic />
-          </button>
           <button
             className="chat-send-button"
             onClick={submitNewMessage}

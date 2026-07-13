@@ -16,40 +16,61 @@ function Chatbot() {
 
   async function submitNewMessage() {
     const trimmedMessage = newMessage.trim();
+
     if (!trimmedMessage || isLoading) return;
 
-    setMessages((draft) => [
-      ...draft,
-      { role: 'user', content: trimmedMessage },
-      { role: 'assistant', content: '', sources: [], loading: true },
-    ]);
-    setNewMessage('');
+    // Add user message
+    setMessages((draft) => {
+      draft.push({
+        role: "user",
+        content: trimmedMessage,
+      });
 
-    let chatIdOrNew = chatId;
+      draft.push({
+        role: "assistant",
+        content: "",
+        loading: true,
+      });
+    });
+
+    setNewMessage("");
 
     try {
-      if (!chatId) {
-        const { id } = await api.createChat();
-        setChatId(id);
-        chatIdOrNew = id;
-      }
-
-      const stream = await api.sendChatMessage(chatIdOrNew, trimmedMessage);
-
-      for await (const textChunk of parseSSEStream(stream)) {
-        setMessages((draft) => {
-          draft[draft.length - 1].content += textChunk;
-        });
-      }
-
-      setMessages((draft) => {
-        draft[draft.length - 1].loading = false;
+      const response = await fetch("http://localhost:8000/ask", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          question: trimmedMessage,
+        }),
       });
-    } catch (err) {
-      console.log(err);
+
+      if (!response.ok) {
+        throw new Error("Backend error");
+      }
+
+      const data = await response.json();
+
       setMessages((draft) => {
-        draft[draft.length - 1].loading = false;
-        draft[draft.length - 1].error = true;
+        draft[draft.length - 1] = {
+          role: "assistant",
+          content: data.answer,
+          timestamp: data.timestamp,
+          loading: false,
+        };
+      });
+
+    } catch (err) {
+      console.error(err);
+
+      setMessages((draft) => {
+        draft[draft.length - 1] = {
+          role: "assistant",
+          content: "Something went wrong.",
+          loading: false,
+          error: true,
+        };
       });
     }
   }

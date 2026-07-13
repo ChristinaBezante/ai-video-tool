@@ -8,11 +8,16 @@ from video_processing import extract_frames
 import json
 import uuid
 # from bert import create_embeddings
+from bert import embed_query    
 from frame_embeddings import create_frame_embeddings
 from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings
 
-from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION
+from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION, search_text
 
+from pydantic import BaseModel
+
+class Question(BaseModel):
+    question: str
 
 # Runtime folder layout used by this API:
 # - uploads/: original uploaded video files
@@ -318,4 +323,46 @@ async def get_upload_status(job_id: str):
         "progress": job.get("progress", 0),
         "error": job.get("error"),
         "result": job.get("result"),
+    }
+
+
+@app.post("/ask")
+async def ask(req: Question):
+
+    question = req.question
+
+    # 1. SBERT embedding of the question
+    query_embedding = embed_query(question)
+
+    print(type(query_embedding))
+    print(len(query_embedding))
+    print(query_embedding[:10])
+
+    # 2. Search text collection
+    text_results = search_text(query_embedding)
+
+    for result in text_results:
+        print(result.payload)
+
+    context = "\n".join(
+        r.payload["text"]
+        for r in text_results
+    )
+    print("Context:", context)
+
+    # # 3. Search frame collection
+    # frame_results = search_frames(query_embedding)
+
+    # # 4. Build context for LLM
+    # context = build_context(text_results, frame_results)
+
+    # # 5. Ask GPT/Llama
+    # answer = ask_llm(question, context)
+
+    # # 6. Pick best timestamp
+    # timestamp = frame_results[0]["timestamp"]
+
+    return {
+        "answer": answer,
+        #"timestamp": timestamp
     }

@@ -99,3 +99,15 @@ def store_frame_embeddings(video_id: str, frame_results: list[dict]):
             collection_name=FRAME_COLLECTION,
             points=points,
         )
+
+
+def search_text(query_embedding: list[float], limit: int = 5):
+
+    results = client.query_points(
+        collection_name=TEXT_COLLECTION,
+        query=query_embedding,
+        limit=limit,
+        with_payload=True,
+    )
+
+    return results.points

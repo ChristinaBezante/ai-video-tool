@@ -45,3 +45,17 @@ def create_embeddings(transcript_json_path: str):
         })
 
     return results
+
+
+def embed_query(question: str):
+    print("Using HF Inference API")
+
+    embedding = client.feature_extraction(
+        question,
+        model="sentence-transformers/all-MiniLM-L6-v2",
+    )
+
+    if hasattr(embedding, "tolist"):
+        embedding = embedding.tolist()
+
+    return embedding

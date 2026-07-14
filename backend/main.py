@@ -12,7 +12,8 @@ from bert import embed_query
 from frame_embeddings import create_frame_embeddings
 from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings
 
-from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION, search_text
+from frame_embeddings import create_frame_embeddings, embed_text_clip
+from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION, search_text, search_frames
 
 from pydantic import BaseModel
 
@@ -331,38 +332,88 @@ async def ask(req: Question):
 
     question = req.question
 
-    # 1. SBERT embedding of the question
+    # 1. SBERT embedding → search text segments
     query_embedding = embed_query(question)
-
-    print(type(query_embedding))
-    print(len(query_embedding))
-    print(query_embedding[:10])
-
-    # 2. Search text collection
     text_results = search_text(query_embedding)
 
     for result in text_results:
         print(result.payload)
 
-    context = "\n".join(
-        r.payload["text"]
-        for r in text_results
-    )
+    context = "\n".join(r.payload["text"] for r in text_results)
     print("Context:", context)
 
-    # # 3. Search frame collection
-    # frame_results = search_frames(query_embedding)
+    # 2. CLIP embedding → search frames by visual similarity
+    frame_query_embedding = embed_text_clip(question)
+    frame_candidates = search_frames(frame_query_embedding, limit=20)
 
-    # # 4. Build context for LLM
-    # context = build_context(text_results, frame_results)
+    for r in frame_candidates:
+        print(f"CLIP score={r.score:.4f}  {r.payload.get('frame')}")
 
-    # # 5. Ask GPT/Llama
-    # answer = ask_llm(question, context)
+    # 3. Hybrid frame selection
+    #
+    #    SEMANTIC query (topic is spoken in the video — high SBERT score):
+    #      For each relevant text segment find the temporally closest frame.
+    #      This gives a direct text-segment → frame correspondence and works
+    #      even when frames are sparse.
+    #
+    #    VISUAL query (topic not in transcript — low SBERT scores, e.g. "circle"):
+    #      Use CLIP gap detection to find visually matching frames.
 
-    # # 6. Pick best timestamp
-    # timestamp = frame_results[0]["timestamp"]
+    TEXT_MIN_SCORE = 0.50   # SBERT cosine threshold to consider a text hit relevant
+    CLIP_MIN_SCORE = 0.18   # hard floor for CLIP-only results
+
+    strong_text = [r for r in text_results if r.score >= TEXT_MIN_SCORE]
+    print(f"Strong text hits: {len(strong_text)}  "
+          f"top score={text_results[0].score:.4f}" if text_results else "")
+
+    if strong_text and frame_candidates:
+        # Map each text segment to its nearest frame (by timestamp distance)
+        selected: dict = {}
+        for seg in strong_text:
+            mid = ((seg.payload.get("start") or 0) + (seg.payload.get("end") or 0)) / 2
+            closest = min(
+                frame_candidates,
+                key=lambda f: abs((f.payload.get("timestamp") or 0) - mid),
+            )
+            selected[closest.id] = closest  # deduplicate via dict
+
+        relevant_frames = sorted(selected.values(),
+                                 key=lambda r: r.payload.get("timestamp") or 0)
+    else:
+        # Visual query — use CLIP gap detection
+        if len(frame_candidates) >= 2:
+            scores = [r.score for r in frame_candidates]
+            gaps = [scores[i] - scores[i + 1] for i in range(len(scores) - 1)]
+            largest_gap_pos = gaps.index(max(gaps))
+            cutoff = scores[largest_gap_pos + 1]
+            relevant_frames = [
+                r for r in frame_candidates
+                if r.score > cutoff and r.score >= CLIP_MIN_SCORE
+            ]
+            if not relevant_frames and frame_candidates[0].score >= CLIP_MIN_SCORE:
+                relevant_frames = [frame_candidates[0]]
+        else:
+            relevant_frames = [r for r in frame_candidates if r.score >= CLIP_MIN_SCORE]
+
+    for r in relevant_frames:
+        print(f"→ frame: {r.payload.get('frame')}  ts={r.payload.get('timestamp'):.2f}")
 
     return {
-        "answer": answer,
-        #"timestamp": timestamp
+        "text_results": [
+            {
+                "text": r.payload.get("text"),
+                "start": r.payload.get("start"),
+                "end": r.payload.get("end"),
+                "score": r.score,
+            }
+            for r in text_results
+        ],
+        "frame_results": [
+            {
+                "frame": r.payload.get("frame"),
+                "timestamp": r.payload.get("timestamp"),
+                "score": r.score,
+            }
+            for r in relevant_frames
+        ],
     }

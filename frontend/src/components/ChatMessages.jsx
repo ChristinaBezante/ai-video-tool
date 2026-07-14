@@ -7,12 +7,20 @@ import { User } from 'lucide-react';
 import { CircleX } from 'lucide-react';
 import '../styles/chatmessages.css';
 
-function ChatMessages({ messages, isLoading }) {
+function formatTimestamp(seconds) {
+  if (seconds == null || isNaN(seconds)) return null;
+  const s = Math.floor(seconds);
+  const m = Math.floor(s / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return `${m}:${ss}`;
+}
+
+function ChatMessages({ messages, isLoading, onSeek }) {
   const scrollContentRef = useAutoScroll(isLoading);
 
   return (
     <div ref={scrollContentRef} className="chat-messages">
-      {messages.map(({ role, content, loading, error }, idx) => (
+      {messages.map(({ role, content, loading, error, timestamps }, idx) => (
         <div
           key={idx}
           className={`chat-message ${role === 'user' ? 'chat-message-user' : ''}`}
@@ -31,6 +39,21 @@ function ChatMessages({ messages, isLoading }) {
                 <div className="chat-message-text">{content}</div>
               )}
             </div>
+
+            {role === 'assistant' && !loading && timestamps && timestamps.length > 0 && (
+              <div className="chat-message-timestamp">
+                {timestamps.map((ts, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    className="chat-message-timestamp-badge"
+                    onClick={() => onSeek && onSeek(ts.start)}
+                  >
+                    ⏱ {formatTimestamp(ts.start)}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {error && (
               <div

@@ -331,7 +331,7 @@ async def get_upload_status(job_id: str):
 
 @app.post("/ask")
 async def ask(req: Question):
-
+  try:
     question = req.question
 
     # 1. SBERT embedding → search text segments
@@ -406,10 +406,26 @@ async def ask(req: Question):
             relevant_frames = [r for r in frame_candidates if r.score >= CLIP_MIN_SCORE]
 
     for r in relevant_frames:
-        print(f"→ frame: {r.payload.get('frame')}  ts={r.payload.get('timestamp'):.2f}")
+        ts = r.payload.get("timestamp")
+        ts_str = f"{ts:.2f}" if ts is not None else "N/A"
+        print(f"→ frame: {r.payload.get('frame')}  ts={ts_str}")
+
+    # Surface only the two most relevant text segments (text_results is already
+    # sorted by Qdrant similarity score, descending), then order those
+    # chronologically so the frontend shows them in the order they occur.
+    top_matches = sorted(text_results, key=lambda r: r.score, reverse=True)[:2]
+    answer_timestamps = sorted(
+        [
+            {"start": r.payload.get("start"), "end": r.payload.get("end")}
+            for r in top_matches
+            if r.payload.get("start") is not None
+        ],
+        key=lambda t: t["start"],
+    )
 
     return {
         "answer": answer,
+        "timestamps": answer_timestamps,
         "text_results": [
             {
                 "text": r.payload.get("text"),
@@ -428,3 +444,9 @@ async def ask(req: Question):
             for r in relevant_frames
         ],
     }
+  except HTTPException:
+    raise
+  except Exception as exc:
+    import traceback
+    traceback.print_exc()
+    raise HTTPException(status_code=500, detail=str(exc))

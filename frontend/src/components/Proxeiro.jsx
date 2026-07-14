@@ -224,6 +224,15 @@ const Proxeiro = () => {
         });
     };
 
+    const seekTo = (seconds) => {
+        const player = playerRef.current;
+        if (!player || typeof seconds !== 'number' || Number.isNaN(seconds)) {
+            return;
+        }
+        player.currentTime(seconds);
+        player.play();
+    };
+
     return(
         <section className="upload-shell">
             <div className="upload-hero">
@@ -310,7 +319,7 @@ const Proxeiro = () => {
                 {uploadedFileURL ? (
                     <div className="upload-chat-shell upload-chat-shell-inline">
                         <div className='chat-panel'>
-                            <ChatBot/>
+                            <ChatBot onSeek={seekTo}/>
                         </div>
                     </div>
                 ) : null}

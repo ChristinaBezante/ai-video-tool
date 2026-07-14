@@ -6,7 +6,7 @@ import ChatMessages from './ChatMessages';
 import ChatInput from './ChatInput';
 import '../styles/chatbot.css';
 
-function Chatbot() {
+function Chatbot({ onSeek }) {
   const [chatId, setChatId] = useState(null);
   const [messages, setMessages] = useImmer([]);
   const [newMessage, setNewMessage] = useState('');
@@ -56,7 +56,7 @@ function Chatbot() {
         draft[draft.length - 1] = {
           role: "assistant",
           content: data.answer,
-          timestamp: data.timestamp,
+          timestamps: data.timestamps ?? [],
           loading: false,
         };
       });
@@ -80,7 +80,7 @@ function Chatbot() {
   return (
     <div className={`chatbot ${isEmpty ? 'chatbot-empty' : 'chatbot-live'}`}>
 
-      {!isEmpty && <ChatMessages messages={messages} isLoading={isLoading} />}
+      {!isEmpty && <ChatMessages messages={messages} isLoading={isLoading} onSeek={onSeek} />}
 
       <ChatInput
         newMessage={newMessage}

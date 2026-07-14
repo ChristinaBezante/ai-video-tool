@@ -93,3 +93,26 @@ def create_frame_embeddings(
             )
 
     return results
+
+
+def embed_text_clip(text: str) -> list[float]:
+    """Encode a text query into the 512-dim CLIP embedding space.
+
+    CLIP aligns text and image representations, so this vector can be
+    compared directly against frame embeddings stored in Qdrant.
+    """
+    import torch  # noqa: PLC0415
+
+    model, processor = _get_model()
+    inputs = processor(text=[text], return_tensors="pt", padding=True)
+    with torch.no_grad():
+        # Call text sub-model and projection explicitly to avoid version
+        # differences in get_text_features() return type.
+        text_outputs = model.text_model(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs.get("attention_mask"),
+        )
+        text_features = model.text_projection(text_outputs.pooler_output)
+    # L2-normalise to unit sphere so cosine similarity == dot product.
+    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+    return text_features[0].tolist()

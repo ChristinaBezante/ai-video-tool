@@ -111,3 +111,16 @@ def search_text(query_embedding: list[float], limit: int = 5):
     )
 
     return results.points
+
+
+def search_frames(query_embedding: list[float], limit: int = 5):
+    """Search the frame collection using a 512-dim CLIP text embedding."""
+
+    results = client.query_points(
+        collection_name=FRAME_COLLECTION,
+        query=query_embedding,
+        limit=limit,
+        with_payload=True,
+    )
+
+    return results.points

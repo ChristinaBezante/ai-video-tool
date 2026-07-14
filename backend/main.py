@@ -15,6 +15,8 @@ from qdrant_store import ensure_collections, store_text_embeddings, store_frame_
 from frame_embeddings import create_frame_embeddings, embed_text_clip
 from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION, search_text, search_frames
 
+from llama import ask_llama
+
 from pydantic import BaseModel
 
 class Question(BaseModel):
@@ -339,8 +341,16 @@ async def ask(req: Question):
     for result in text_results:
         print(result.payload)
 
-    context = "\n".join(r.payload["text"] for r in text_results)
+    sorted_results = sorted(text_results, key=lambda r: r.payload.get("start") or 0)
+    context = "\n".join(r.payload["text"] for r in sorted_results)
     print("Context:", context)
+
+    try:
+        answer = ask_llama(question=question, context=context)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM provider error: {e}")
+
+    print(answer)
 
     # 2. CLIP embedding → search frames by visual similarity
     frame_query_embedding = embed_text_clip(question)
@@ -399,6 +409,7 @@ async def ask(req: Question):
         print(f"→ frame: {r.payload.get('frame')}  ts={r.payload.get('timestamp'):.2f}")
 
     return {
+        "answer": answer,
         "text_results": [
             {
                 "text": r.payload.get("text"),

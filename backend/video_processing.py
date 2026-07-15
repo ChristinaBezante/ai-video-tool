@@ -2,6 +2,71 @@ import re
 import ffmpeg
 from pathlib import Path
 
+def normalize_video(video_path, normalized_dir):
+    """
+    Return a video in the project's canonical format.
+
+    Canonical format:
+        Container : MP4
+        Video     : H.264
+        Audio     : AAC
+
+    If the input already matches this format, the original path is returned.
+    Otherwise the video is transcoded once and the path to the normalized
+    file is returned.
+    """
+
+    video_path = Path(video_path)
+    normalized_dir = Path(normalized_dir)
+    normalized_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        probe = ffmpeg.probe(str(video_path))
+    except ffmpeg.Error as e:
+        raise RuntimeError(f"Could not probe video: {e}")
+
+    container = probe["format"]["format_name"]
+
+    video_codec = None
+    audio_codec = None
+
+    for stream in probe["streams"]:
+        if stream["codec_type"] == "video":
+            video_codec = stream["codec_name"]
+        elif stream["codec_type"] == "audio":
+            audio_codec = stream["codec_name"]
+
+    already_ok = (
+        "mp4" in container
+        and video_codec == "h264"
+        and audio_codec == "aac"
+    )
+
+    if already_ok:
+        print("Video already in canonical format.")
+        return video_path
+
+    output_path = normalized_dir / f"{video_path.stem}_normalized.mp4"
+
+    print("Normalizing video...")
+
+    (
+        ffmpeg
+        .input(str(video_path))
+        .output(
+            str(output_path),
+            vcodec="libx264",
+            acodec="aac",
+            movflags="+faststart"
+        )
+        .overwrite_output()
+        .run()
+    )
+
+    print(f"Normalized video saved to {output_path}")
+
+    return output_path
+
 
 def extract_audio(video_path, output_audio):
     """Extract speech-friendly WAV audio from a video file.

@@ -1,8 +1,12 @@
 import os
 import re
+import time
 import wave
 from huggingface_hub import InferenceClient
 from dotenv import load_dotenv
+import math
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 load_dotenv()
 
@@ -11,6 +15,51 @@ whisper_token = os.getenv("HF_TOKEN")
 MAX_SEGMENT_SECONDS = 30.0
 
 client = InferenceClient(provider="hf-inference", token=whisper_token)
+
+CHUNK_SECONDS = 120  # 2 minutes
+
+# The shared HF "hf-inference" endpoint is serverless infra: on a cold start
+# (or under load) it can take longer to spin up whisper-large-v3 than the
+# router's own gateway timeout allows, which surfaces as a 504 to us even
+# though the request itself was fine. Retrying with backoff smooths over
+# these transient failures without needing a dedicated Inference Endpoint.
+ASR_MAX_RETRIES = 3
+ASR_RETRY_BACKOFF_SECONDS = 8
+_RETRYABLE_MARKERS = ("504", "502", "503", "gateway", "timeout", "timed out")
+
+
+def _is_retryable_asr_error(exc):
+    message = str(exc).lower()
+    return any(marker in message for marker in _RETRYABLE_MARKERS)
+
+
+def split_audio(audio_path, output_dir, chunk_seconds=CHUNK_SECONDS):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    chunk_paths = []
+
+    with wave.open(str(audio_path), "rb") as wav:
+        params = wav.getparams()
+
+        sample_rate = wav.getframerate()
+        frames_per_chunk = sample_rate * chunk_seconds
+
+        total_frames = wav.getnframes()
+        total_chunks = math.ceil(total_frames / frames_per_chunk)
+
+        for i in range(total_chunks):
+            frames = wav.readframes(frames_per_chunk)
+
+            chunk_path = output_dir / f"chunk_{i:04d}.wav"
+
+            with wave.open(str(chunk_path), "wb") as out:
+                out.setparams(params)
+                out.writeframes(frames)
+
+            chunk_paths.append(chunk_path)
+
+    return chunk_paths
 
 
 def _coerce_to_dict(output):
@@ -177,13 +226,33 @@ def _refine_segments(segments, audio_path, fallback_text, max_segment_seconds=MA
     return refined
 
 def transcribe_audio(audio_path: str):
-    output = client.automatic_speech_recognition(
-        audio_path,
-        model="openai/whisper-large-v3",
-        extra_body={
-            "return_timestamps": True
-        }
-    )
+    output = None
+    last_exc = None
+
+    for attempt in range(1, ASR_MAX_RETRIES + 1):
+        try:
+            output = client.automatic_speech_recognition(
+                audio_path,
+                model="openai/whisper-large-v3",
+                extra_body={
+                    "return_timestamps": True
+                }
+            )
+            last_exc = None
+            break
+        except Exception as e:
+            last_exc = e
+            if attempt == ASR_MAX_RETRIES or not _is_retryable_asr_error(e):
+                raise
+            wait_seconds = ASR_RETRY_BACKOFF_SECONDS * attempt
+            print(
+                f"transcribe_audio: attempt {attempt}/{ASR_MAX_RETRIES} failed "
+                f"for {audio_path} ({e}); retrying in {wait_seconds}s..."
+            )
+            time.sleep(wait_seconds)
+
+    if output is None:
+        raise last_exc
 
     data = _coerce_to_dict(output)
     segments = _refine_segments(_normalize_segments(data), audio_path, data.get("text") or "")
@@ -192,4 +261,58 @@ def transcribe_audio(audio_path: str):
         "text": (data.get("text") or "").strip(),
         "segments": segments,
         "timestamps": segments,
+    }
+
+MAX_WORKERS = 4
+
+
+def transcribe_audio_chunks(audio_path):
+    chunks = split_audio(audio_path, "temp_chunks")
+
+    full_text = ""
+    all_segments = []
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+
+        futures = {}
+
+        for index, chunk in enumerate(chunks):
+            futures[
+                executor.submit(transcribe_audio, str(chunk))
+            ] = index
+
+        results = {}
+
+        for future in as_completed(futures):
+
+            index = futures[future]
+
+            try:
+                results[index] = future.result()
+            except Exception as e:
+                print(f"Chunk {index} failed: {e}")
+
+    for index in sorted(results):
+
+        result = results[index]
+
+        offset = index * CHUNK_SECONDS
+
+        full_text += result["text"] + " "
+
+        for segment in result["segments"]:
+
+            segment["start"] += offset
+            segment["end"] += offset
+
+            all_segments.append(segment)
+
+    # Delete temporary chunks AFTER transcription is complete
+    for chunk in chunks:
+        chunk.unlink(missing_ok=True)
+
+    return {
+        "text": full_text.strip(),
+        "segments": all_segments,
+        "timestamps": all_segments,
     }

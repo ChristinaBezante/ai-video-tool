@@ -42,6 +42,10 @@ def create_embeddings(transcript_json_path: str):
     with open(transcript_json_path, "r", encoding="utf-8") as f:
         transcript = json.load(f)
 
+    return create_embeddings_from_transcript(transcript)
+
+
+def create_embeddings_from_transcript(transcript: dict):
     results = []
 
     chunks = transcript.get("segments") or transcript.get("chunks") or []

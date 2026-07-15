@@ -3,12 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from video_processing import extract_audio
-from video_processing import extract_frames,normalize_video
+from video_processing import extract_frames
 from whisper import transcribe_audio_chunks
 import json
 import uuid
-from bert import create_embeddings
-from bert import embed_query    
+from bert import create_embeddings_from_transcript, embed_query
 from frame_embeddings import create_frame_embeddings
 from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings
 
@@ -42,6 +41,13 @@ AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 FRAMES_DIR = Path(__file__).resolve().parent
 FRAMES_DIR = BASE_DIR / "frames"
 FRAMES_DIR.mkdir(parents=True, exist_ok=True)
+
+# Shared JSON stores: every uploaded video's data is merged into these single
+# fixed files (keyed by video stem) instead of writing a new JSON file named
+# after each video's title.
+TRANSCRIPTS_PATH = AUDIO_DIR / "output.json"
+EMBEDDINGS_PATH = AUDIO_DIR / "output_embeddings.json"
+FRAME_EMBEDDINGS_PATH = FRAMES_DIR / "output_frame_embeddings.json"
 
 app = FastAPI()
 
@@ -143,6 +149,26 @@ def _compact_transcript_for_json(transcript):
     return {"segments": segments}
 
 
+def _update_shared_json(path: Path, video_id: str, data):
+    """Merge one video's data into a shared JSON file instead of creating a
+    new JSON file per video. The file stores a dict keyed by video_id, and
+    re-uploading a video with the same stem overwrites just its own entry.
+    """
+    store = {}
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as f:
+            try:
+                store = json.load(f)
+            except json.JSONDecodeError:
+                store = {}
+
+    store[video_id] = data
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(store, f, indent=2, ensure_ascii=False)
+
+
 def _set_job_status(job_id, status=None, stage=None, progress=None, error=None, result=None):
     job = JOBS.get(job_id, {})
     if status is not None:
@@ -169,70 +195,67 @@ def _process_upload_job(
     frame_max_width,
 ):
     try:
-        video_path = normalize_video(
-            video_path,
-            "uploads",
-        )
+        video_path = Path(video_path)
         _set_job_status(job_id, status="processing", stage="extracting_audio", progress=20)
 
         output_audio = AUDIO_DIR / f"{video_path.stem}.wav"
         extract_audio(video_path, output_audio)
 
-        _set_job_status(job_id, status="processing", stage="transcribing", progress=50)
-        transcript = transcribe_audio_chunks(str(output_audio))
-        
-        transcript_path = AUDIO_DIR / f"{video_path.stem}.json"
-        transcript_for_json = _compact_transcript_for_json(transcript)
-        with open(transcript_path, "w", encoding="utf-8") as f:
-            json.dump(transcript_for_json, f, indent=2, ensure_ascii=False)
-        
-        _set_job_status(job_id, status="processing", stage="creating_embeddings", progress=65)
-        embeddings = create_embeddings(str(transcript_path))
-        
-        store_text_embeddings(video_path.stem, embeddings)
-        
-        embedding_path = AUDIO_DIR / f"{video_path.stem}_embeddings.json"
-        with open(embedding_path, "w", encoding="utf-8") as f:
-            json.dump(embeddings, f, indent=2, ensure_ascii=False)
+        # Transcription/embedding can fail even after whisper.py's own retries
+        # (e.g. a long video keeps hitting the hosted ASR endpoint's gateway
+        # timeout). That shouldn't stop the whole upload — frames and audio
+        # are still useful on their own — so this stage's failure is caught
+        # and recorded instead of aborting _process_upload_job.
+        transcript_error = None
+        transcript_for_json = {"segments": []}
+        embeddings = []
+        try:
+            _set_job_status(job_id, status="processing", stage="transcribing", progress=50)
+            transcript = transcribe_audio_chunks(str(output_audio))
+            transcript_for_json = _compact_transcript_for_json(transcript)
 
-        transcript = None
+            _set_job_status(job_id, status="processing", stage="creating_embeddings", progress=65)
+            embeddings = create_embeddings_from_transcript(transcript_for_json)
 
-        # _set_job_status(job_id, status="processing", stage="extracting_frames", progress=80)
-        # output_frames_dir = FRAMES_DIR / video_path.stem
-        # frame_count, frame_timestamps = extract_frames(
-        #     video_path,
-        #     output_frames_dir,
-        #     interval_seconds=frame_interval_sec,
-        #     extraction_mode=frame_strategy,
-        #     scene_threshold=scene_threshold,
-        #     keyframes_only=keyframes_only,
-        #     max_width=frame_max_width,
-        # )
+            store_text_embeddings(video_path.stem, embeddings)
+        except Exception as e:
+            transcript_error = str(e)
+            print(f"Transcription/embedding failed for {video_path.stem}, continuing without it: {e}")
 
-        # _set_job_status(job_id, status="processing", stage="creating_frame_embeddings", progress=90)
-        # frame_embeddings = create_frame_embeddings(
-        #     str(output_frames_dir),
-        #     timestamps=frame_timestamps,
-        # )
+        _update_shared_json(TRANSCRIPTS_PATH, video_path.stem, transcript_for_json)
+        _update_shared_json(EMBEDDINGS_PATH, video_path.stem, embeddings)
 
-        # store_frame_embeddings(video_path.stem, frame_embeddings)
+        _set_job_status(job_id, status="processing", stage="extracting_frames", progress=80)
+        output_frames_dir = FRAMES_DIR / video_path.stem
+        frame_count, frame_timestamps = extract_frames(
+            video_path,
+            output_frames_dir,
+            interval_seconds=frame_interval_sec,
+            extraction_mode=frame_strategy,
+            scene_threshold=scene_threshold,
+            keyframes_only=keyframes_only,
+            max_width=frame_max_width,
+        )
 
-        # frame_embedding_path = output_frames_dir / f"{video_path.stem}_frame_embeddings.json"
-        # with open(frame_embedding_path, "w", encoding="utf-8") as f:
-        #     json.dump(frame_embeddings, f, indent=2, ensure_ascii=False)
+        _set_job_status(job_id, status="processing", stage="creating_frame_embeddings", progress=90)
+        frame_embeddings = create_frame_embeddings(
+            str(output_frames_dir),
+            timestamps=frame_timestamps,
+        )
 
-        frame_count = 0
-        frame_timestamps = []
-        frame_embeddings = []
+        store_frame_embeddings(video_path.stem, frame_embeddings)
+        _update_shared_json(FRAME_EMBEDDINGS_PATH, video_path.stem, frame_embeddings)
 
         result = {
             "filename": filename,
             "file_url": f"/uploads/{filename}",
             "audio_url": f"/audio/{video_path.stem}.wav",
-            "transcript_url": f"/audio/{video_path.stem}.json",
-            "embeddings_url": f"/audio/{video_path.stem}_embeddings.json",
-            "frame_embeddings_url": f"/frames/{video_path.stem}/{video_path.stem}_frame_embeddings.json",
-            "transcript": transcript,
+            "video_id": video_path.stem,
+            "transcript_url": "/audio/output.json",
+            "embeddings_url": "/audio/output_embeddings.json",
+            "frame_embeddings_url": "/frames/output_frame_embeddings.json",
+            "transcript": transcript_for_json,
+            "transcript_error": transcript_error,
             "frame_count": frame_count,
             "frames_url_prefix": f"/frames/{video_path.stem}/",
             "frame_settings": {

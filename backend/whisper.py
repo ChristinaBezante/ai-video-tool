@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import math
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import random
 
 load_dotenv()
 
@@ -16,7 +17,7 @@ MAX_SEGMENT_SECONDS = 30.0
 
 client = InferenceClient(provider="hf-inference", token=whisper_token)
 
-CHUNK_SECONDS =  60  # 2 minutes
+CHUNK_SECONDS =  30  # 3 minutes instead of 1
 
 # The shared HF "hf-inference" endpoint is serverless infra: on a cold start
 # (or under load) it can take longer to spin up whisper-large-v3 than the
@@ -263,7 +264,7 @@ def transcribe_audio(audio_path: str):
         "timestamps": segments,
     }
 
-MAX_WORKERS = 4
+MAX_WORKERS = 8
 
 
 def transcribe_audio_chunks(audio_path):
@@ -308,6 +309,24 @@ def transcribe_audio_chunks(audio_path):
                 results[index] = result
             except Exception as e:
                 print(f"Chunk {index} failed: {e}")
+
+    # --- retry any chunks that failed on the first pass ---
+    failed_indices = [i for i in range(len(chunks)) if i not in results]
+    if failed_indices:
+        print(f"Retrying {len(failed_indices)} failed chunks...")
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            retry_futures = {
+                executor.submit(transcribe_audio, str(chunks[i])): i
+                for i in failed_indices
+            }
+            for future in as_completed(retry_futures):
+                index = retry_futures[future]
+                try:
+                    results[index] = future.result()
+                    print(f"Chunk {index} succeeded on retry")
+                except Exception as e:
+                    print(f"Chunk {index} failed again: {e}")
+
 
     for index in sorted(results):
 

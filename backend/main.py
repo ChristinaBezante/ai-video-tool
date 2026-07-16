@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 from fastapi.staticfiles import StaticFiles
 from video_processing import extract_audio
-from video_processing import extract_frames
+from video_processing import extract_frames, normalize_video
 from whisper import transcribe_audio_chunks
 import json
 import uuid
@@ -26,6 +26,9 @@ class Question(BaseModel):
 # - uploads/: original uploaded video files
 # - audio/: extracted WAV audio files (same stem as video)
 # - frames/: extracted image frames grouped by video stem
+# - normalized/: re-encoded MP4s produced when a video needs format
+#   normalization or its audio stream turns out to be corrupted
+#   (see normalize_video's `force` fallback in _process_upload_job)
 #
 # Using Path(__file__).parent keeps paths stable regardless of where the
 # process is started from.
@@ -42,6 +45,9 @@ AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 FRAMES_DIR = Path(__file__).resolve().parent
 FRAMES_DIR = BASE_DIR / "frames"
 FRAMES_DIR.mkdir(parents=True, exist_ok=True)
+
+NORMALIZED_DIR = BASE_DIR / "normalized"
+NORMALIZED_DIR.mkdir(parents=True, exist_ok=True)
 
 # Shared JSON stores: every uploaded video's data is merged into these single
 # fixed files (keyed by video stem) instead of writing a new JSON file named
@@ -169,14 +175,15 @@ def _clear_previous_uploads(current_video):
 
 
 def _clear_previous_video_files(current_stem: str):
-    """Remove on-disk audio/frame artifacts left behind by any video other
-    than the one currently being processed.
+    """Remove on-disk audio/frame/normalized artifacts left behind by any
+    video other than the one currently being processed.
 
     This app only keeps one active video's data at a time (same reasoning as
-    clear_collections() and _update_shared_json() above), but audio/*.wav
-    and frames/<stem>/ were never being cleaned up, so old uploads just
-    accumulated on disk indefinitely even though the JSON stores looked
-    "current". This brings the filesystem in line with that same rule.
+    clear_collections() and _update_shared_json() above), but audio/*.wav,
+    frames/<stem>/, and normalized/*.mp4 were never being cleaned up, so old
+    uploads just accumulated on disk indefinitely even though the JSON
+    stores looked "current". This brings the filesystem in line with that
+    same rule.
     """
     for wav_file in AUDIO_DIR.glob("*.wav"):
         if wav_file.stem != current_stem:
@@ -185,6 +192,10 @@ def _clear_previous_video_files(current_stem: str):
     for frame_dir in FRAMES_DIR.iterdir():
         if frame_dir.is_dir() and frame_dir.name != current_stem:
             shutil.rmtree(frame_dir, ignore_errors=True)
+
+    for normalized_file in NORMALIZED_DIR.glob("*.mp4"):
+        if normalized_file.stem != f"{current_stem}_normalized":
+            normalized_file.unlink(missing_ok=True)
 
 
 
@@ -226,7 +237,12 @@ def _process_upload_job(
         _clear_previous_uploads(video_path.name)
 
         output_audio = AUDIO_DIR / f"{video_path.stem}.wav"
-        extract_audio(video_path, output_audio)
+        try:
+            extract_audio(video_path, output_audio)
+        except RuntimeError as e:
+            transcript_error = f"Could not extract audio: {e}"
+            print(transcript_error)
+            output_audio = None
 
         # Transcription/embedding can fail even after whisper.py's own retries
         # (e.g. a long video keeps hitting the hosted ASR endpoint's gateway
@@ -238,7 +254,8 @@ def _process_upload_job(
         embeddings = []
         try:
             _set_job_status(job_id, status="processing", stage="transcribing", progress=50)
-            transcript = transcribe_audio_chunks(str(output_audio))
+            if output_audio and output_audio.exists():
+                transcript = transcribe_audio_chunks(str(output_audio))
             transcript_for_json = _compact_transcript_for_json(transcript)
 
             _set_job_status(job_id, status="processing", stage="creating_embeddings", progress=65)

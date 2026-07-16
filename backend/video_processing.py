@@ -2,7 +2,7 @@ import re
 import ffmpeg
 from pathlib import Path
 
-def normalize_video(video_path, normalized_dir):
+def normalize_video(video_path, normalized_dir, force=False):
     """
     Return a video in the project's canonical format.
 
@@ -36,7 +36,7 @@ def normalize_video(video_path, normalized_dir):
         elif stream["codec_type"] == "audio":
             audio_codec = stream["codec_name"]
 
-    already_ok = (
+    already_ok = (not force) and (
         "mp4" in container
         and video_codec == "h264"
         and audio_codec == "aac"
@@ -69,22 +69,40 @@ def normalize_video(video_path, normalized_dir):
 
 
 def extract_audio(video_path, output_audio):
-    """Extract speech-friendly WAV audio from a video file.
+    attempts = [
+        {},
+        {"err_detect": "ignore_err"},
+        {
+            "err_detect": "ignore_err",
+            "fflags": "+discardcorrupt",
+        },
+    ]
 
-    Output format is PCM 16-bit, mono, 16 kHz. This is a common baseline for
-    ASR/transcription pipelines and keeps file handling simple downstream.
-    """
-    try:
-        (
-            ffmpeg.input(str(video_path))
-            .output(str(output_audio), acodec="pcm_s16le", ac=1, ar="16000")
-            .overwrite_output()
-            .run(capture_stdout=True, capture_stderr=True)
-        )
-        print(f"Audio extracted successfully to {output_audio}")
-    except ffmpeg.Error as e:
-        stderr = e.stderr.decode(errors="replace") if e.stderr else str(e)
-        raise RuntimeError(f"Audio extraction failed: {stderr}") from e
+    last_error = None
+
+    for kwargs in attempts:
+        try:
+            (
+                ffmpeg
+                .input(str(video_path), **kwargs)
+                .output(
+                    str(output_audio),
+                    acodec="pcm_s16le",
+                    ac=1,
+                    ar=16000,
+                )
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+
+            print("Audio extracted successfully.")
+            return
+
+        except ffmpeg.Error as e:
+            last_error = e
+
+    stderr = last_error.stderr.decode(errors="replace")
+    raise RuntimeError(stderr)
 
 
 _PTS_TIME_RE = re.compile(r"pts_time:([0-9.]+)")

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useImmer } from 'use-immer';
 // import api from '@/api';
 // import { parseSSEStream } from '@/utils';
+import { Bot } from 'lucide-react';
 import ChatMessages from './ChatMessages';
 import ChatInput from './ChatInput';
 import '../styles/chatbot.css';
@@ -14,8 +15,8 @@ function Chatbot({ onSeek }) {
   const isLoading =
     messages.length && messages[messages.length - 1].loading;
 
-  async function submitNewMessage() {
-    const trimmedMessage = newMessage.trim();
+  async function submitNewMessage(overrideText) {
+    const trimmedMessage = (overrideText ?? newMessage).trim();
 
     if (!trimmedMessage || isLoading) return;
 
@@ -80,13 +81,28 @@ function Chatbot({ onSeek }) {
   return (
     <div className={`chatbot ${isEmpty ? 'chatbot-empty' : 'chatbot-live'}`}>
 
+      <div className="chatbot-header">
+        <div className="chatbot-header-icon">
+          <Bot size={18} />
+        </div>
+        <div>
+          <p className="chatbot-header-title">Video AI</p>
+          <div className="chatbot-header-status">
+            <span className="chatbot-header-dot" />
+            <span>Ready to chat</span>
+          </div>
+        </div>
+      </div>
+
       {!isEmpty && <ChatMessages messages={messages} isLoading={isLoading} onSeek={onSeek} />}
+
+      {isEmpty && <div className="chatbot-empty-spacer" />}
 
       <ChatInput
         newMessage={newMessage}
         isLoading={isLoading}
         setNewMessage={setNewMessage}
-        submitNewMessage={submitNewMessage}
+        submitNewMessage={() => submitNewMessage()}
       />
     </div>
   );

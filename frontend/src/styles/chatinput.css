@@ -4,8 +4,6 @@
 }
 
 .chat-input-outer {
-  padding: 0.22rem;
-  background: linear-gradient(135deg, rgba(124, 77, 255, 0.48), rgba(255, 79, 164, 0.45));
   border-radius: 20px;
   font-family: inherit;
   transform-origin: bottom;
@@ -19,9 +17,9 @@
   padding-right: 3.2rem;
   padding-left: 2.9rem;
   background: rgba(41, 46, 59, 0.96);
-  border-radius: 18px;
+  border-radius: 20px;
   overflow: hidden;
-  border: 1px solid rgba(111, 127, 168, 0.38);
+  border: 1px solid rgba(124, 58, 237, 0.28);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 

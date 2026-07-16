@@ -44,6 +44,19 @@ def ensure_collections():
         )
 
 
+def clear_collections():
+    """Wipe all stored points so only the most recently uploaded video's data
+    is searchable. The frontend only supports one active video at a time, so
+    leftover points from a previous upload would otherwise pollute /ask
+    results with segments/frames from a video that's no longer displayed.
+    """
+    if client.collection_exists(TEXT_COLLECTION):
+        client.delete_collection(TEXT_COLLECTION)
+    if client.collection_exists(FRAME_COLLECTION):
+        client.delete_collection(FRAME_COLLECTION)
+    ensure_collections()
+
+
 def store_text_embeddings(video_id: str, segments: list[dict]):
     points = []
 

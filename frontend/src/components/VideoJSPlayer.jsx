@@ -1,6 +1,7 @@
 import React from 'react';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
+import '../styles/videojs.css';
 
 //https://legacy.videojs.org/guides/react/
 

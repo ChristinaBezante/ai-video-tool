@@ -1,7 +1,19 @@
 import '../styles/proxeiro.css'
-import React,{useEffect, useRef, useState} from 'react';
+import React,{useEffect, useMemo, useRef, useState} from 'react';
 import axios from 'axios';  ///do in terminal npm install axios
-import { CloudUpload, MessageCircle, ChevronRight, LoaderCircle, CheckCircle2 } from 'lucide-react';
+import {
+    CloudUpload,
+    MessageCircle,
+    ChevronRight,
+    LoaderCircle,
+    CheckCircle2,
+    RefreshCw,
+    Play,
+    Pause,
+    Volume2,
+    VolumeX,
+    Maximize2,
+} from 'lucide-react';
 //pip install "fastapi[standard]"
 //to run fastapi dev main.py
 //npm i video.js
@@ -17,10 +29,16 @@ const Proxeiro = () => {
     const [uploadError, setUploadError] = useState('');
     const [isUploading, setIsUploading] = useState(false);
     const [processingStage, setProcessingStage] = useState('idle');
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [isMuted, setIsMuted] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
 
     const playerRef = React.useRef(null);
     const uploadInputRef = useRef(null);
     const replaceInputRef = useRef(null);
+    const seekTrackRef = useRef(null);
+    const isScrubbingRef = useRef(false);
 
     useEffect(() => {
         return () => {
@@ -82,6 +100,9 @@ const Proxeiro = () => {
             setIsUploading(true);
             setUploadError('');
             setUploadedFileURL(null);
+            setIsPlaying(false);
+            setCurrentTime(0);
+            setDuration(0);
             setProcessingStage('uploading');
             setBackendProgress(0);
             const config = {
@@ -191,12 +212,16 @@ const Proxeiro = () => {
     //http://github.com/videojs/video.js/issues/5307
     //mp4 created with hevc is not supported by chrome only safary 
 
-    const videoJsOptions = {
+    const videoJsOptions = useMemo(() => ({
         //https://legacy.videojs.org/guides/options/
         autoplay: false,
         poster: true,
         loop: true,
-        controls: true,
+        controls: false,
+        // Disable video.js's own click-to-toggle so it doesn't double-fire
+        // alongside our custom onClick handlers (that was causing clicks to
+        // appear to do nothing).
+        userActions: { click: false },
         responsive: true,
         fill: true,   // fill parent container dimensions
         backgroundColor: "black",
@@ -208,7 +233,7 @@ const Proxeiro = () => {
             type: 'video/mp4',
         },
         ],
-    };
+    }), [uploadedFileURL]);
 
     const displayProgress = processingStage === 'uploading' ? uploadProgress : backendProgress;
 
@@ -222,6 +247,80 @@ const Proxeiro = () => {
         player.on('dispose', () => {
         console.log('Player will dispose');
         });
+
+        player.on('play', () => setIsPlaying(true));
+        player.on('pause', () => setIsPlaying(false));
+        player.on('volumechange', () => setIsMuted(player.muted() || player.volume() === 0));
+        player.on('loadedmetadata', () => setDuration(player.duration() || 0));
+        player.on('timeupdate', () => {
+            if (!isScrubbingRef.current) {
+                setCurrentTime(player.currentTime() || 0);
+            }
+        });
+    };
+
+    const togglePlay = () => {
+        const player = playerRef.current;
+        if (!player) return;
+        if (player.paused()) {
+            player.play();
+        } else {
+            player.pause();
+        }
+    };
+
+    const toggleMute = () => {
+        const player = playerRef.current;
+        if (!player) return;
+        player.muted(!player.muted());
+    };
+
+    const toggleFullscreen = () => {
+        const player = playerRef.current;
+        if (!player) return;
+        if (player.isFullscreen()) {
+            player.exitFullscreen();
+        } else {
+            player.requestFullscreen();
+        }
+    };
+
+    const scrubToPointer = (event) => {
+        const player = playerRef.current;
+        const track = seekTrackRef.current;
+        if (!player || !track || !duration) return;
+        const rect = track.getBoundingClientRect();
+        const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+        const time = ratio * duration;
+        setCurrentTime(time);
+        player.currentTime(time);
+    };
+
+    const handleSeekPointerDown = (event) => {
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        isScrubbingRef.current = true;
+        scrubToPointer(event);
+    };
+
+    const handleSeekPointerMove = (event) => {
+        if (!isScrubbingRef.current) return;
+        scrubToPointer(event);
+    };
+
+    const handleSeekPointerUp = (event) => {
+        event.stopPropagation();
+        if (!isScrubbingRef.current) return;
+        isScrubbingRef.current = false;
+        scrubToPointer(event);
+    };
+
+    const formatTime = (seconds) => {
+        if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+        const total = Math.floor(seconds);
+        const m = Math.floor(total / 60);
+        const s = String(total % 60).padStart(2, '0');
+        return `${m}:${s}`;
     };
 
     const seekTo = (seconds) => {
@@ -294,11 +393,9 @@ const Proxeiro = () => {
                     ) : (
                         <div className="upload-loaded-stage">
                             <div className="upload-loaded-header">
-                                <div>
-                                    <p className="upload-status"><CheckCircle2 size={16} /> Video ready</p>
-                                    <h2>{file?.name ?? 'Uploaded video'}</h2>
-                                </div>
+                                <p className="upload-status"><CheckCircle2 size={16} /> Video ready</p>
                                 <button className="upload-secondary-action" type="button" onClick={handleReplaceClick}>
+                                    <RefreshCw size={14} />
                                     Replace file
                                 </button>
                                 <input
@@ -309,8 +406,57 @@ const Proxeiro = () => {
                                     onChange={handleChange}
                                 />
                             </div>
-                            <div className='video-container'>
-                                <VideoJSPlayer options={videoJsOptions} onReady={handlePlayerReady}/>
+                            <h2 className="upload-video-title">{file?.name ?? 'Uploaded video'}</h2>
+
+                            <div className={`video-stage${isPlaying ? ' video-stage-playing' : ''}`} onClick={togglePlay}>
+                                <div className='video-container'>
+                                    <VideoJSPlayer options={videoJsOptions} onReady={handlePlayerReady}/>
+                                </div>
+
+                                <div className="video-center-overlay">
+                                    <button
+                                        type="button"
+                                        className="video-center-btn"
+                                        onClick={(event) => { event.stopPropagation(); togglePlay(); }}
+                                        aria-label={isPlaying ? 'Pause video' : 'Play video'}
+                                    >
+                                        {isPlaying ? <Pause size={26} /> : <Play size={26} />}
+                                    </button>
+                                </div>
+
+                                <div className="video-controls-bar" onClick={(event) => event.stopPropagation()}>
+                                    <div
+                                        ref={seekTrackRef}
+                                        className="video-seek-track"
+                                        onPointerDown={handleSeekPointerDown}
+                                        onPointerMove={handleSeekPointerMove}
+                                        onPointerUp={handleSeekPointerUp}
+                                    >
+                                        <div
+                                            className="video-seek-fill"
+                                            style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                                        />
+                                        <div
+                                            className="video-seek-handle"
+                                            style={{ left: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                                        />
+                                    </div>
+
+                                    <div className="video-controls-row">
+                                        <div className="video-controls-left">
+                                            <button type="button" onClick={togglePlay} aria-label={isPlaying ? 'Pause' : 'Play'}>
+                                                {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                                            </button>
+                                            <button type="button" onClick={toggleMute} aria-label={isMuted ? 'Unmute' : 'Mute'}>
+                                                {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                                            </button>
+                                            <span className="video-time">{formatTime(currentTime)} / {formatTime(duration)}</span>
+                                        </div>
+                                        <button type="button" onClick={toggleFullscreen} aria-label="Fullscreen">
+                                            <Maximize2 size={16} />
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}

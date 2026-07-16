@@ -1,15 +1,14 @@
 import Header from './header.jsx'
 import Footer from './Footer.jsx'
 import { useEffect, useRef, useState } from 'react';
-import { Zap, Shield, Users, Star } from 'lucide-react';
+import { Zap, Shield, Users, Star, ArrowUp } from 'lucide-react';
 import { useLocation, useNavigate } from "react-router-dom";
 
 const insightData = {
   speed:    { label: 'How fast?',      text: 'Ask "what happens at minute 34?" and get an answer before you\'d even find the scrubber. No buffering, no waiting — just the moment you need.' },
   privacy:  { label: 'Your data',      text: 'We never see your videos. Everything runs locally on your machine, so sensitive footage stays exactly where you left it.' },
-  teams:    { label: 'Built for you',  text: 'Whether it\'s two people or twenty, everyone can search the same video and jump straight to the part that matters to them.' },
+  students: { label: 'Built for you',  text: 'Whether it\'s one lecture or an entire semester, you can search everything you\'ve recorded and jump straight to the moment that matters.' },
   footage:  { label: 'No more scrubbing', text: 'We built this because we were tired of dragging a timeline slider hoping we\'d land on the right scene. There\'s a better way.' },
-  creators: { label: 'Made by creators', text: 'Christina and Enterisa started this as a uni project and couldn\'t stop. If you make videos for a living, this one\'s for you.' },
 };
 
 function InsightSpan({ word, active, onToggle }) {
@@ -99,6 +98,27 @@ function MainPage() {
     return () => document.removeEventListener('click', close);
   }, [activeInsight]);
 
+  // Show a floating "Back to Top" button once scrolled past the hero.
+  // #root is the real scroll container here (see the rAF effect below), so
+  // we listen on it instead of window.
+  const [showBackToTop, setShowBackToTop] = useState(false);
+
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const scrollEl = root || document.documentElement;
+    const handleScroll = () => {
+      const scrollTop = scrollEl.scrollTop || window.scrollY || 0;
+      setShowBackToTop(scrollTop > 480);
+    };
+    scrollEl.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollEl.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    const root = document.getElementById('root');
+    const scrollEl = root || document.documentElement;
+    scrollEl.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   // rAF-based scroll progress — reads from the actual scroll container
   useEffect(() => {
     let rafId;
@@ -234,6 +254,15 @@ function MainPage() {
 
   return (
     <div className="page-content-wrap">
+      <button
+        type="button"
+        className={`back-to-top${showBackToTop ? ' back-to-top-visible' : ''}`}
+        onClick={scrollToTop}
+        aria-label="Back to top"
+      >
+        <ArrowUp size={16} />
+        Back to Top
+      </button>
       <div className="page-bar-track" aria-hidden="true">
         <div ref={stepFillRef} className="page-bar-fill" />
         <div className="page-stepper-node psn-1" />
@@ -332,23 +361,20 @@ function MainPage() {
                 About <span className="feature-heading-accent">Us</span>
               </h2>
               <p>
-                Ctrl + Vid combines{' '}
+                Re-watching a two-hour lecture just to find one specific explanation can be
+                exhausting. That's why we built Ctrl + Vid.
+              </p>
+              <p>
+                Designed specifically with{' '}
+                <InsightSpan word="students" active={activeInsight === 'students'} onToggle={toggleInsight} />{' '}
+                in mind, it transforms long academic lectures from overwhelming video files into
+                genuinely useful study tools. We've combined{' '}
                 <InsightSpan word="speed" active={activeInsight === 'speed'} onToggle={toggleInsight} />,{' '}
                 clarity, and{' '}
                 <InsightSpan word="privacy" active={activeInsight === 'privacy'} onToggle={toggleInsight} />{' '}
-                into a video workflow that feels effortless and consistent with the rest of the
-                site. We built it for{' '}
-                <InsightSpan word="teams" active={activeInsight === 'teams'} onToggle={toggleInsight} />{' '}
-                who are tired of scrubbing through{' '}
-                <InsightSpan word="footage" active={activeInsight === 'footage'} onToggle={toggleInsight} />,{' '}
-                and for{' '}
-                <InsightSpan word="creators" active={activeInsight === 'creators'} onToggle={toggleInsight} />{' '}
-                who want their video data to be immediately useful, not just stored.
-              </p>
-              <p>
-                Every part of the experience is designed to make video easier to explore, share,
-                and act on from quick searchable clips to secure collaboration and instant
-                visual summaries.
+                into a seamless workflow so you can spend less time blindly scrubbing through{' '}
+                <InsightSpan word="footage" active={activeInsight === 'footage'} onToggle={toggleInsight} />{' '}
+                and more time actually learning.
               </p>
               <div className="about-feature-list about-feature-list-compact">
                 <span className="about-feature-pill">Searchable clips</span>

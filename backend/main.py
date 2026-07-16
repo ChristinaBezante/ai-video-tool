@@ -9,7 +9,7 @@ import json
 import uuid
 from bert import create_embeddings_from_transcript, embed_query
 from frame_embeddings import create_frame_embeddings
-from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings
+from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings, clear_collections
 
 from frame_embeddings import create_frame_embeddings, embed_text_clip
 from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION, search_text, search_frames
@@ -150,19 +150,13 @@ def _compact_transcript_for_json(transcript):
 
 
 def _update_shared_json(path: Path, video_id: str, data):
-    """Merge one video's data into a shared JSON file instead of creating a
-    new JSON file per video. The file stores a dict keyed by video_id, and
-    re-uploading a video with the same stem overwrites just its own entry.
-    """
-    store = {}
-    if path.exists():
-        with open(path, "r", encoding="utf-8") as f:
-            try:
-                store = json.load(f)
-            except json.JSONDecodeError:
-                store = {}
+    """Replace the shared JSON file's contents with just this video's data.
 
-    store[video_id] = data
+    The frontend only supports one active video at a time, so each new
+    upload should fully replace whatever was previously stored here rather
+    than accumulating every video ever uploaded.
+    """
+    store = {video_id: data}
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -197,6 +191,11 @@ def _process_upload_job(
     try:
         video_path = Path(video_path)
         _set_job_status(job_id, status="processing", stage="extracting_audio", progress=20)
+
+        # This app only keeps one active video's data at a time — wipe
+        # whatever was stored for the previous video before processing the
+        # new one, so /ask never mixes results across uploads.
+        clear_collections()
 
         output_audio = AUDIO_DIR / f"{video_path.stem}.wav"
         extract_audio(video_path, output_audio)

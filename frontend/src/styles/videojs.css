@@ -5,3 +5,29 @@
   justify-content: center;
   margin: auto;
 }
+
+/* ── Play/pause control styling to match the app's purple/pink theme ── */
+.video-js .vjs-big-play-button {
+  background-color: rgba(124, 58, 237, 0.85);
+  border-color: rgba(255, 59, 154, 0.6);
+}
+
+.video-js:hover .vjs-big-play-button,
+.video-js .vjs-big-play-button:hover,
+.video-js .vjs-big-play-button:focus {
+  background-color: rgba(255, 59, 154, 0.9);
+  border-color: rgba(255, 59, 154, 0.9);
+}
+
+.video-js .vjs-control-bar .vjs-play-control .vjs-icon-placeholder:before {
+  color: #fff;
+  transition: color 150ms ease;
+}
+
+.video-js.vjs-paused .vjs-control-bar .vjs-play-control .vjs-icon-placeholder:before {
+  color: #ff3b9a;
+}
+
+.video-js .vjs-control-bar .vjs-play-control:hover .vjs-icon-placeholder:before {
+  color: #ff5ba8;
+}

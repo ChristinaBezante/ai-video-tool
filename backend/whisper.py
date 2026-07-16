@@ -16,7 +16,7 @@ MAX_SEGMENT_SECONDS = 30.0
 
 client = InferenceClient(provider="hf-inference", token=whisper_token)
 
-CHUNK_SECONDS = 120  # 2 minutes
+CHUNK_SECONDS =  60  # 2 minutes
 
 # The shared HF "hf-inference" endpoint is serverless infra: on a cold start
 # (or under load) it can take longer to spin up whisper-large-v3 than the
@@ -263,11 +263,20 @@ def transcribe_audio(audio_path: str):
         "timestamps": segments,
     }
 
-MAX_WORKERS = 4
+MAX_WORKERS = 1
 
 
 def transcribe_audio_chunks(audio_path):
-    chunks = split_audio(audio_path, "temp_chunks")
+    audio_path = Path(audio_path)
+    # Give each video its own chunk subfolder (named after the audio file's
+    # stem) instead of a single shared "temp_chunks" folder. With one shared
+    # folder, leftover chunks from a crashed/previous run, or a second
+    # upload processed while this one is still running, could collide with
+    # or get mixed into this video's chunk_0000.wav-style filenames.
+    chunk_dir = Path("temp_chunks") / audio_path.stem
+    chunks = split_audio(audio_path, chunk_dir)
+
+    print(f"Created {len(chunks)} chunks")
 
     full_text = ""
     all_segments = []
@@ -289,6 +298,14 @@ def transcribe_audio_chunks(audio_path):
 
             try:
                 results[index] = future.result()
+
+                result = future.result()
+
+                print(f"\nChunk {index}")
+                print("Text:", result["text"][:80])
+                print("Segments:", len(result["segments"]))
+
+                results[index] = result
             except Exception as e:
                 print(f"Chunk {index} failed: {e}")
 
@@ -307,9 +324,19 @@ def transcribe_audio_chunks(audio_path):
 
             all_segments.append(segment)
 
+    print("Successful chunks:", len(results))
+    print("Failed chunks:", len(chunks) - len(results))
+
     # Delete temporary chunks AFTER transcription is complete
     for chunk in chunks:
         chunk.unlink(missing_ok=True)
+    try:
+        chunk_dir.rmdir()
+    except OSError:
+        pass  # not empty (unexpected leftover file) or already removed
+
+    print("Merged text length:", len(full_text))
+    print("Merged segments:", len(all_segments))
 
     return {
         "text": full_text.strip(),

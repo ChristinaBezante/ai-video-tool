@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
+import shutil
 from fastapi.staticfiles import StaticFiles
 from video_processing import extract_audio
 from video_processing import extract_frames
@@ -149,18 +150,42 @@ def _compact_transcript_for_json(transcript):
     return {"segments": segments}
 
 
-def _update_shared_json(path: Path, video_id: str, data):
-    """Replace the shared JSON file's contents with just this video's data.
+def _update_shared_json(path: Path, data):
+    """Overwrite the shared JSON file's contents with just this video's data.
 
     The frontend only supports one active video at a time, so each new
-    upload should fully replace whatever was previously stored here rather
-    than accumulating every video ever uploaded.
+    upload should fully replace whatever was previously stored here (the
+    raw segments/embeddings themselves, no video_id wrapper) rather than
+    accumulating every video ever uploaded.
     """
-    store = {video_id: data}
-
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(store, f, indent=2, ensure_ascii=False)
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def _clear_previous_uploads(current_video):
+    for file in UPLOAD_DIR.iterdir():
+        if file.is_file() and file.name != current_video:
+            file.unlink(missing_ok=True)
+
+
+def _clear_previous_video_files(current_stem: str):
+    """Remove on-disk audio/frame artifacts left behind by any video other
+    than the one currently being processed.
+
+    This app only keeps one active video's data at a time (same reasoning as
+    clear_collections() and _update_shared_json() above), but audio/*.wav
+    and frames/<stem>/ were never being cleaned up, so old uploads just
+    accumulated on disk indefinitely even though the JSON stores looked
+    "current". This brings the filesystem in line with that same rule.
+    """
+    for wav_file in AUDIO_DIR.glob("*.wav"):
+        if wav_file.stem != current_stem:
+            wav_file.unlink(missing_ok=True)
+
+    for frame_dir in FRAMES_DIR.iterdir():
+        if frame_dir.is_dir() and frame_dir.name != current_stem:
+            shutil.rmtree(frame_dir, ignore_errors=True)
+
 
 
 def _set_job_status(job_id, status=None, stage=None, progress=None, error=None, result=None):
@@ -196,6 +221,9 @@ def _process_upload_job(
         # whatever was stored for the previous video before processing the
         # new one, so /ask never mixes results across uploads.
         clear_collections()
+        _clear_previous_video_files(video_path.stem)
+
+        _clear_previous_uploads(video_path.name)
 
         output_audio = AUDIO_DIR / f"{video_path.stem}.wav"
         extract_audio(video_path, output_audio)
@@ -221,8 +249,8 @@ def _process_upload_job(
             transcript_error = str(e)
             print(f"Transcription/embedding failed for {video_path.stem}, continuing without it: {e}")
 
-        _update_shared_json(TRANSCRIPTS_PATH, video_path.stem, transcript_for_json)
-        _update_shared_json(EMBEDDINGS_PATH, video_path.stem, embeddings)
+        _update_shared_json(TRANSCRIPTS_PATH, transcript_for_json)
+        _update_shared_json(EMBEDDINGS_PATH, embeddings)
 
         _set_job_status(job_id, status="processing", stage="extracting_frames", progress=80)
         output_frames_dir = FRAMES_DIR / video_path.stem
@@ -243,7 +271,7 @@ def _process_upload_job(
         )
 
         store_frame_embeddings(video_path.stem, frame_embeddings)
-        _update_shared_json(FRAME_EMBEDDINGS_PATH, video_path.stem, frame_embeddings)
+        _update_shared_json(FRAME_EMBEDDINGS_PATH, frame_embeddings)
 
         result = {
             "filename": filename,

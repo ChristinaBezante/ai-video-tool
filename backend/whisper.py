@@ -25,7 +25,7 @@ CHUNK_SECONDS =  60  # 2 minutes
 # these transient failures without needing a dedicated Inference Endpoint.
 ASR_MAX_RETRIES = 3
 ASR_RETRY_BACKOFF_SECONDS = 8
-_RETRYABLE_MARKERS = ("504", "502", "503", "gateway", "timeout", "timed out")
+_RETRYABLE_MARKERS = ("504", "502", "503", "429", "gateway", "timeout", "timed out", "rate limit")
 
 
 def _is_retryable_asr_error(exc):
@@ -244,7 +244,7 @@ def transcribe_audio(audio_path: str):
             last_exc = e
             if attempt == ASR_MAX_RETRIES or not _is_retryable_asr_error(e):
                 raise
-            wait_seconds = ASR_RETRY_BACKOFF_SECONDS * attempt
+            wait_seconds = ASR_RETRY_BACKOFF_SECONDS * attempt + random.uniform(0, 3)
             print(
                 f"transcribe_audio: attempt {attempt}/{ASR_MAX_RETRIES} failed "
                 f"for {audio_path} ({e}); retrying in {wait_seconds}s..."
@@ -263,7 +263,7 @@ def transcribe_audio(audio_path: str):
         "timestamps": segments,
     }
 
-MAX_WORKERS = 1
+MAX_WORKERS = 4
 
 
 def transcribe_audio_chunks(audio_path):

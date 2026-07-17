@@ -2,6 +2,7 @@ import json
 import os
 import time
 
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
@@ -14,6 +15,11 @@ client = InferenceClient(
 )
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Text embedding calls are I/O-bound (waiting on the HF API), so running
+# several concurrently in threads gives a near-linear speedup instead of
+# embedding one transcript segment at a time.
+MAX_WORKERS = 8
 
 
 def _feature_extraction_with_retry(text: str, max_attempts: int = 3, backoff_seconds: float = 1.5):
@@ -31,7 +37,7 @@ def _feature_extraction_with_retry(text: str, max_attempts: int = 3, backoff_sec
             last_error = e
             status_code = getattr(e.response, "status_code", None)
             if status_code and status_code < 500:
-                raise  # client error (bad request/auth) — retrying won't help
+                raise  # client error (bad request/auth) -- retrying won't help
             if attempt < max_attempts:
                 time.sleep(backoff_seconds * attempt)
     raise last_error
@@ -46,17 +52,24 @@ def create_embeddings(transcript_json_path: str):
 
 
 def create_embeddings_from_transcript(transcript: dict):
-    results = []
-
     chunks = transcript.get("segments") or transcript.get("chunks") or []
 
-    for chunk in chunks:
-        text = (chunk.get("text") or "").strip()
-        if not text:
-            continue
+    # Filter down to segments that actually have text first, so the thread
+    # pool only ever does useful work and stays index-aligned with `texts`.
+    valid_chunks = [c for c in chunks if (c.get("text") or "").strip()]
+    texts = [c["text"].strip() for c in valid_chunks]
 
-        embedding = _feature_extraction_with_retry(text)
+    if not texts:
+        return []
 
+    # executor.map preserves input order in its output, so embeddings[i]
+    # always corresponds to texts[i] / valid_chunks[i] -- no re-matching
+    # needed after the concurrent calls finish.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        embeddings = list(executor.map(_feature_extraction_with_retry, texts))
+
+    results = []
+    for chunk, text, embedding in zip(valid_chunks, texts, embeddings):
         # Convert NumPy array to a regular Python list
         if hasattr(embedding, "tolist"):
             embedding = embedding.tolist()

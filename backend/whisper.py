@@ -234,7 +234,7 @@ def transcribe_audio(audio_path: str):
         try:
             output = client.automatic_speech_recognition(
                 audio_path,
-                model="openai/whisper-large-v3",
+                model="openai/whisper-large-v3-turbo",
                 extra_body={
                     "return_timestamps": True
                 }
@@ -264,7 +264,7 @@ def transcribe_audio(audio_path: str):
         "timestamps": segments,
     }
 
-MAX_WORKERS = 8
+MAX_WORKERS = 24
 
 
 def transcribe_audio_chunks(audio_path):

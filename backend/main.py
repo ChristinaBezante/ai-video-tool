@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from fastapi.staticfiles import StaticFiles
 from video_processing import extract_audio
 from video_processing import extract_frames, normalize_video
@@ -9,10 +10,8 @@ from whisper import transcribe_audio_chunks
 import json
 import uuid
 from bert import create_embeddings_from_transcript, embed_query
-from frame_embeddings import create_frame_embeddings
-from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings, clear_collections
-
 from frame_embeddings import create_frame_embeddings, embed_text_clip
+from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings, clear_collections
 from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION, search_text, search_frames
 
 from llama import ask_llama
@@ -214,6 +213,74 @@ def _set_job_status(job_id, status=None, stage=None, progress=None, error=None, 
     JOBS[job_id] = job
 
 
+def _run_audio_pipeline(video_path: Path, output_audio: Path):
+    """Extract audio, transcribe it, and create/store text embeddings.
+
+    Runs on its own thread inside _process_upload_job, in parallel with
+    _run_frame_pipeline. Transcription/embedding failures are caught and
+    returned as an error string rather than raised, so a flaky ASR call
+    doesn't take down frame processing too -- frames and audio are each
+    useful on their own.
+    """
+    transcript_error = None
+    transcript_for_json = {"segments": []}
+    embeddings = []
+
+    try:
+        extract_audio(video_path, output_audio)
+    except RuntimeError as e:
+        transcript_error = f"Could not extract audio: {e}"
+        print(transcript_error)
+        output_audio = None
+
+    try:
+        if output_audio and Path(output_audio).exists():
+            transcript = transcribe_audio_chunks(str(output_audio))
+            transcript_for_json = _compact_transcript_for_json(transcript)
+            embeddings = create_embeddings_from_transcript(transcript_for_json)
+            store_text_embeddings(video_path.stem, embeddings)
+    except Exception as e:
+        transcript_error = str(e)
+        print(f"Transcription/embedding failed for {video_path.stem}, continuing without it: {e}")
+
+    return transcript_for_json, embeddings, transcript_error
+
+
+def _run_frame_pipeline(
+    video_path: Path,
+    output_frames_dir: Path,
+    frame_interval_sec,
+    frame_strategy,
+    scene_threshold,
+    keyframes_only,
+    frame_max_width,
+):
+    """Extract frames and create/store CLIP embeddings.
+
+    Runs on its own thread inside _process_upload_job, in parallel with
+    _run_audio_pipeline. Nothing here depends on the transcript, so it can
+    run fully concurrently with the audio/text pipeline.
+    """
+    frame_count, frame_timestamps = extract_frames(
+        video_path,
+        output_frames_dir,
+        interval_seconds=frame_interval_sec,
+        extraction_mode=frame_strategy,
+        scene_threshold=scene_threshold,
+        keyframes_only=keyframes_only,
+        max_width=frame_max_width,
+    )
+
+    frame_embeddings = create_frame_embeddings(
+        str(output_frames_dir),
+        timestamps=frame_timestamps,
+    )
+
+    store_frame_embeddings(video_path.stem, frame_embeddings)
+
+    return frame_count, frame_embeddings
+
+
 def _process_upload_job(
     job_id,
     filename,
@@ -226,68 +293,47 @@ def _process_upload_job(
 ):
     try:
         video_path = Path(video_path)
-        _set_job_status(job_id, status="processing", stage="extracting_audio", progress=20)
 
-        # This app only keeps one active video's data at a time — wipe
+        # This app only keeps one active video's data at a time -- wipe
         # whatever was stored for the previous video before processing the
         # new one, so /ask never mixes results across uploads.
         clear_collections()
         _clear_previous_video_files(video_path.stem)
-
         _clear_previous_uploads(video_path.name)
 
         output_audio = AUDIO_DIR / f"{video_path.stem}.wav"
-        try:
-            extract_audio(video_path, output_audio)
-        except RuntimeError as e:
-            transcript_error = f"Could not extract audio: {e}"
-            print(transcript_error)
-            output_audio = None
+        output_frames_dir = FRAMES_DIR / video_path.stem
 
-        # Transcription/embedding can fail even after whisper.py's own retries
-        # (e.g. a long video keeps hitting the hosted ASR endpoint's gateway
-        # timeout). That shouldn't stop the whole upload — frames and audio
-        # are still useful on their own — so this stage's failure is caught
-        # and recorded instead of aborting _process_upload_job.
-        transcript_error = None
-        transcript_for_json = {"segments": []}
-        embeddings = []
-        try:
-            _set_job_status(job_id, status="processing", stage="transcribing", progress=50)
-            if output_audio and output_audio.exists():
-                transcript = transcribe_audio_chunks(str(output_audio))
-            transcript_for_json = _compact_transcript_for_json(transcript)
+        # Audio (extract -> transcribe -> embed) and frames (extract -> CLIP
+        # embed) don't depend on each other, so run them concurrently instead
+        # of sequentially. This is the main lever for cutting total upload
+        # processing time, since the audio pipeline is network/ASR-bound and
+        # the frame pipeline is CPU/GPU-bound -- they don't compete for the
+        # same resource.
+        _set_job_status(job_id, status="processing", stage="processing_audio_and_frames", progress=20)
 
-            _set_job_status(job_id, status="processing", stage="creating_embeddings", progress=65)
-            embeddings = create_embeddings_from_transcript(transcript_for_json)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            audio_future = executor.submit(_run_audio_pipeline, video_path, output_audio)
+            frame_future = executor.submit(
+                _run_frame_pipeline,
+                video_path,
+                output_frames_dir,
+                frame_interval_sec,
+                frame_strategy,
+                scene_threshold,
+                keyframes_only,
+                frame_max_width,
+            )
 
-            store_text_embeddings(video_path.stem, embeddings)
-        except Exception as e:
-            transcript_error = str(e)
-            print(f"Transcription/embedding failed for {video_path.stem}, continuing without it: {e}")
+            # .result() blocks until that future's thread finishes, but both
+            # threads are already running concurrently by this point.
+            transcript_for_json, embeddings, transcript_error = audio_future.result()
+            frame_count, frame_embeddings = frame_future.result()
+
+        _set_job_status(job_id, status="processing", stage="finalizing", progress=95)
 
         _update_shared_json(TRANSCRIPTS_PATH, transcript_for_json)
         _update_shared_json(EMBEDDINGS_PATH, embeddings)
-
-        _set_job_status(job_id, status="processing", stage="extracting_frames", progress=80)
-        output_frames_dir = FRAMES_DIR / video_path.stem
-        frame_count, frame_timestamps = extract_frames(
-            video_path,
-            output_frames_dir,
-            interval_seconds=frame_interval_sec,
-            extraction_mode=frame_strategy,
-            scene_threshold=scene_threshold,
-            keyframes_only=keyframes_only,
-            max_width=frame_max_width,
-        )
-
-        _set_job_status(job_id, status="processing", stage="creating_frame_embeddings", progress=90)
-        frame_embeddings = create_frame_embeddings(
-            str(output_frames_dir),
-            timestamps=frame_timestamps,
-        )
-
-        store_frame_embeddings(video_path.stem, frame_embeddings)
         _update_shared_json(FRAME_EMBEDDINGS_PATH, frame_embeddings)
 
         result = {
@@ -404,7 +450,7 @@ async def ask(req: Question):
   try:
     question = req.question
 
-    # 1. SBERT embedding → search text segments
+    # 1. SBERT embedding -> search text segments
     query_embedding = embed_query(question)
     text_results = search_text(query_embedding)
 
@@ -422,7 +468,7 @@ async def ask(req: Question):
 
     print(answer)
 
-    # 2. CLIP embedding → search frames by visual similarity
+    # 2. CLIP embedding -> search frames by visual similarity
     frame_query_embedding = embed_text_clip(question)
     frame_candidates = search_frames(frame_query_embedding, limit=20)
 
@@ -431,12 +477,12 @@ async def ask(req: Question):
 
     # 3. Hybrid frame selection
     #
-    #    SEMANTIC query (topic is spoken in the video — high SBERT score):
+    #    SEMANTIC query (topic is spoken in the video -- high SBERT score):
     #      For each relevant text segment find the temporally closest frame.
-    #      This gives a direct text-segment → frame correspondence and works
+    #      This gives a direct text-segment -> frame correspondence and works
     #      even when frames are sparse.
     #
-    #    VISUAL query (topic not in transcript — low SBERT scores, e.g. "circle"):
+    #    VISUAL query (topic not in transcript -- low SBERT scores, e.g. "circle"):
     #      Use CLIP gap detection to find visually matching frames.
 
     TEXT_MIN_SCORE = 0.50   # SBERT cosine threshold to consider a text hit relevant
@@ -460,7 +506,7 @@ async def ask(req: Question):
         relevant_frames = sorted(selected.values(),
                                  key=lambda r: r.payload.get("timestamp") or 0)
     else:
-        # Visual query — use CLIP gap detection
+        # Visual query -- use CLIP gap detection
         if len(frame_candidates) >= 2:
             scores = [r.score for r in frame_candidates]
             gaps = [scores[i] - scores[i + 1] for i in range(len(scores) - 1)]
@@ -478,7 +524,7 @@ async def ask(req: Question):
     for r in relevant_frames:
         ts = r.payload.get("timestamp")
         ts_str = f"{ts:.2f}" if ts is not None else "N/A"
-        print(f"→ frame: {r.payload.get('frame')}  ts={ts_str}")
+        print(f"-> frame: {r.payload.get('frame')}  ts={ts_str}")
 
     # Surface only the two most relevant text segments (text_results is already
     # sorted by Qdrant similarity score, descending), then order those

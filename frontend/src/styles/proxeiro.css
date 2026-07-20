@@ -240,6 +240,101 @@
   color: #ff9db5;
 }
 
+/* ── YouTube import ──────────────────────────────── */
+.yt-open-btn {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: 1.5px solid rgba(255, 79, 164, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 79, 164, 0.08);
+  color: #ff9ecb;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.yt-open-btn:hover:not(:disabled) {
+  background: rgba(255, 79, 164, 0.18);
+  border-color: rgba(255, 79, 164, 0.8);
+  transform: translateY(-1px);
+}
+
+.yt-open-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.yt-inline-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1.5px solid rgba(255, 79, 164, 0.45);
+  border-radius: 999px;
+  background: rgba(15, 12, 30, 0.9);
+}
+
+.yt-inline-icon {
+  color: #ff4e4e;
+  flex-shrink: 0;
+}
+
+.yt-inline-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: #f6f2ff;
+  font-size: 0.93rem;
+  outline: none;
+}
+
+.yt-inline-input::placeholder {
+  color: rgba(176, 169, 200, 0.6);
+}
+
+.yt-inline-submit,
+.yt-inline-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.yt-inline-submit {
+  background: linear-gradient(135deg, #ff3d96, #ff6f91);
+  color: #fff;
+}
+
+.yt-inline-submit:hover:not(:disabled) {
+  transform: scale(1.08);
+}
+
+.yt-inline-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.yt-inline-close {
+  background: rgba(255, 255, 255, 0.08);
+  color: #b0a9c8;
+}
+
+.yt-inline-close:hover {
+  background: rgba(255, 255, 255, 0.14);
+  transform: scale(1.08);
+}
+
 .upload-loaded-stage {
   height: 100%;
   display: flex;

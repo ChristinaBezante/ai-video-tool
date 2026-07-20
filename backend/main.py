@@ -20,6 +20,162 @@ from pydantic import BaseModel
 
 class Question(BaseModel):
     question: str
+    video_id: str | None = None
+    # Prior conversation turns as [{"role": "user"|"assistant", "content": str}, ...],
+    # oldest first. Optional -- lets the LLM handle follow-up questions
+    # ("what about that?") instead of treating every question in isolation.
+    history: list[dict] | None = None
+
+
+def _detect_question_language(text: str) -> str:
+    """Return the answer language expected by the user.
+
+    Greek-script input gets a Greek answer; everything else defaults to English.
+    """
+    if any("\u0370" <= char <= "\u03ff" or "\u1f00" <= char <= "\u1fff" for char in text):
+        return "Greek"
+    return "English"
+
+
+def _detect_transcript_language(text: str) -> str:
+    """Prefer Greek when the transcript contains Greek script."""
+    if any("\u0370" <= char <= "\u03ff" or "\u1f00" <= char <= "\u1fff" for char in text):
+        return "Greek"
+    return "English"
+
+
+def _is_summary_request(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "summarize",
+            "summary",
+            "overview",
+            "what is this video about",
+            "τι δείχνει",
+            "περίληψη",
+            "σύνοψη",
+        )
+    )
+
+
+def _summary_query_for_language(language: str) -> str:
+    if language == "Greek":
+        return "δώσε μια περίληψη του βίντεο με τα βασικά σημεία"
+    return "give a summary of the video with the main points"
+
+
+def _clip_query_for_summary() -> str:
+    return "video summary"
+
+
+def _initialize_current_video_id() -> str | None:
+    uploads = [path for path in UPLOAD_DIR.iterdir() if path.is_file()]
+    if not uploads:
+        return None
+    latest_upload = max(uploads, key=lambda path: path.stat().st_mtime)
+    return latest_upload.stem
+
+
+def _load_transcript_text(video_id: str | None) -> str:
+    if not video_id or not TRANSCRIPTS_PATH.exists():
+        return ""
+
+    try:
+        with open(TRANSCRIPTS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return ""
+
+    transcript_data = data.get(video_id) if isinstance(data, dict) else None
+    if transcript_data is None and isinstance(data, dict) and "segments" in data:
+        transcript_data = data
+
+    if not isinstance(transcript_data, dict):
+        return ""
+
+    segments = transcript_data.get("segments") or []
+    texts = []
+    for segment in segments:
+        if isinstance(segment, dict):
+            text = segment.get("text")
+            if text:
+                texts.append(text)
+
+    return " ".join(texts)
+
+
+def _load_transcript_record(video_id: str | None):
+    if not TRANSCRIPTS_PATH.exists():
+        return None
+
+    try:
+        with open(TRANSCRIPTS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+
+    if isinstance(data, dict):
+        if video_id and isinstance(data.get(video_id), dict):
+            return data[video_id]
+        if "segments" in data:
+            return data
+
+    return None
+
+
+def _find_uploaded_video(video_id: str | None):
+    if not video_id:
+        return None
+
+    matches = [path for path in UPLOAD_DIR.iterdir() if path.is_file() and path.stem == video_id]
+    if not matches:
+        return None
+
+    return max(matches, key=lambda path: path.stat().st_mtime)
+
+
+def _ensure_text_artifacts(video_id: str | None):
+    transcript_data = _load_transcript_record(video_id)
+    transcript_has_text = bool(
+        transcript_data
+        and any(
+            isinstance(segment, dict) and (segment.get("text") or "").strip()
+            for segment in (transcript_data.get("segments") or [])
+        )
+    )
+
+    embeddings_present = False
+    if EMBEDDINGS_PATH.exists():
+        try:
+            with open(EMBEDDINGS_PATH, "r", encoding="utf-8") as f:
+                embeddings_present = bool(json.load(f))
+        except Exception:
+            embeddings_present = False
+
+    if transcript_has_text and not embeddings_present:
+        embeddings = create_embeddings_from_transcript(transcript_data)
+        _update_shared_json(EMBEDDINGS_PATH, embeddings)
+        store_text_embeddings(video_id or "current", embeddings)
+        return transcript_data, embeddings
+
+    if transcript_has_text:
+        return transcript_data, None
+
+    uploaded_video = _find_uploaded_video(video_id)
+    if not uploaded_video:
+        return None, None
+
+    output_audio = AUDIO_DIR / f"{uploaded_video.stem}.wav"
+    transcript_for_json, embeddings, _ = _run_audio_pipeline(uploaded_video, output_audio)
+
+    if transcript_for_json.get("segments"):
+        _update_shared_json(TRANSCRIPTS_PATH, transcript_for_json)
+    if embeddings:
+        _update_shared_json(EMBEDDINGS_PATH, embeddings)
+
+    return transcript_for_json, embeddings
 
 # Runtime folder layout used by this API:
 # - uploads/: original uploaded video files
@@ -54,6 +210,8 @@ NORMALIZED_DIR.mkdir(parents=True, exist_ok=True)
 TRANSCRIPTS_PATH = AUDIO_DIR / "output.json"
 EMBEDDINGS_PATH = AUDIO_DIR / "output_embeddings.json"
 FRAME_EMBEDDINGS_PATH = FRAMES_DIR / "output_frame_embeddings.json"
+
+CURRENT_VIDEO_ID = _initialize_current_video_id()
 
 app = FastAPI()
 
@@ -229,9 +387,15 @@ def _run_audio_pipeline(video_path: Path, output_audio: Path):
     try:
         extract_audio(video_path, output_audio)
     except RuntimeError as e:
-        transcript_error = f"Could not extract audio: {e}"
-        print(transcript_error)
-        output_audio = None
+        print(f"Direct audio extraction failed for {video_path.stem}: {e}")
+        try:
+            normalized_video = normalize_video(video_path, NORMALIZED_DIR, force=True)
+            print(f"Retrying audio extraction from normalized video: {normalized_video}")
+            extract_audio(normalized_video, output_audio)
+        except Exception as normalize_error:
+            transcript_error = f"Could not extract audio: {normalize_error}"
+            print(transcript_error)
+            output_audio = None
 
     try:
         if output_audio and Path(output_audio).exists():
@@ -293,6 +457,8 @@ def _process_upload_job(
 ):
     try:
         video_path = Path(video_path)
+        global CURRENT_VIDEO_ID
+        CURRENT_VIDEO_ID = video_path.stem
 
         # This app only keeps one active video's data at a time -- wipe
         # whatever was stored for the previous video before processing the
@@ -359,6 +525,117 @@ def _process_upload_job(
         _set_job_status(job_id, status="completed", stage="completed", progress=100, result=result)
     except Exception as e:
         _set_job_status(job_id, status="failed", stage="failed", progress=100, error=str(e))
+
+
+class YoutubeRequest(BaseModel):
+    url: str
+    frame_interval_sec: float = 5.0
+    frame_strategy: str = "scene"
+    scene_threshold: float = 0.35
+    keyframes_only: bool = True
+    frame_max_width: int = 640
+
+
+@app.post('/download-youtube/')
+async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTasks):
+    """Download a YouTube video via yt-dlp, save it to uploads/, then process
+    it through the same background pipeline as a regular file upload."""
+    import re as _re
+    import subprocess
+    import sys
+
+    url = (req.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="No URL provided")
+
+    if not _re.search(r"(youtube\.com|youtu\.be)", url):
+        raise HTTPException(status_code=400, detail="URL does not look like a YouTube link")
+
+    job_id = str(uuid.uuid4())
+    JOBS[job_id] = {
+        "job_id": job_id,
+        "status": "processing",
+        "stage": "downloading",
+        "progress": 3,
+        "error": None,
+        "result": None,
+    }
+
+    def _download_and_process():
+        import subprocess
+        import sys
+
+        # Resolve yt-dlp from the same Python env so it works regardless of
+        # whether the venv Scripts/ folder is on the system PATH.
+        scripts_dir = Path(sys.executable).parent
+        yt_dlp_exe = scripts_dir / "yt-dlp.exe"
+        if not yt_dlp_exe.exists():
+            yt_dlp_exe = scripts_dir / "yt-dlp"          # Linux / macOS
+        if not yt_dlp_exe.exists():
+            _set_job_status(job_id, status="failed", stage="failed", progress=100,
+                            error="yt-dlp not found in the Python environment")
+            return
+
+        try:
+            _set_job_status(job_id, stage="downloading", progress=5)
+
+            # Use a fixed UUID-based filename so we always know exactly where
+            # the file lands — no stdout parsing, no fallback to "newest file".
+            file_stem = f"yt_{uuid.uuid4().hex[:12]}"
+            out_path = UPLOAD_DIR / f"{file_stem}.mp4"
+
+            result = subprocess.run(
+                [
+                    str(yt_dlp_exe),
+                    "--no-playlist",
+                    "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                    "--merge-output-format", "mp4",
+                    "-o", str(out_path),
+                    url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip()
+                _set_job_status(job_id, status="failed", stage="failed", progress=100,
+                                error=f"yt-dlp failed: {stderr[-600:]}")
+                return
+
+            if not out_path.exists() or out_path.stat().st_size == 0:
+                _set_job_status(job_id, status="failed", stage="failed", progress=100,
+                                error="Download appeared to succeed but the output file is missing or empty")
+                return
+
+            _set_job_status(job_id, stage="processing_audio_and_frames", progress=20)
+            _process_upload_job(
+                job_id,
+                out_path.name,
+                str(out_path),
+                req.frame_interval_sec,
+                req.frame_strategy,
+                req.scene_threshold,
+                req.keyframes_only,
+                req.frame_max_width,
+            )
+        except subprocess.TimeoutExpired:
+            _set_job_status(job_id, status="failed", stage="failed", progress=100,
+                            error="Download timed out (video may be too long or network too slow)")
+        except Exception as exc:
+            _set_job_status(job_id, status="failed", stage="failed", progress=100, error=str(exc))
+
+    background_tasks.add_task(_download_and_process)
+
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "stage": "downloading",
+        "progress": 3,
+        "status_url": f"/upload-status/{job_id}",
+    }
+
 
 @app.post('/uploadfile/')
 async def create_upload_file(
@@ -447,122 +724,146 @@ async def get_upload_status(job_id: str):
 
 @app.post("/ask")
 async def ask(req: Question):
-  try:
-    question = req.question
-
-    # 1. SBERT embedding -> search text segments
-    query_embedding = embed_query(question)
-    text_results = search_text(query_embedding)
-
-    for result in text_results:
-        print(result.payload)
-
-    sorted_results = sorted(text_results, key=lambda r: r.payload.get("start") or 0)
-    context = "\n".join(r.payload["text"] for r in sorted_results)
-    print("Context:", context)
-
     try:
-        answer = ask_llama(question=question, context=context)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM provider error: {e}")
+        question = req.question
+        requested_video_id = req.video_id
+        history = (req.history or [])[-6:]
 
-    print(answer)
+        current_video_id = requested_video_id or CURRENT_VIDEO_ID
 
-    # 2. CLIP embedding -> search frames by visual similarity
-    frame_query_embedding = embed_text_clip(question)
-    frame_candidates = search_frames(frame_query_embedding, limit=20)
+        _ensure_text_artifacts(current_video_id)
 
-    for r in frame_candidates:
-        print(f"CLIP score={r.score:.4f}  {r.payload.get('frame')}")
+        summary_mode = _is_summary_request(question)
+        answer_language = _detect_question_language(question)
 
-    # 3. Hybrid frame selection
-    #
-    #    SEMANTIC query (topic is spoken in the video -- high SBERT score):
-    #      For each relevant text segment find the temporally closest frame.
-    #      This gives a direct text-segment -> frame correspondence and works
-    #      even when frames are sparse.
-    #
-    #    VISUAL query (topic not in transcript -- low SBERT scores, e.g. "circle"):
-    #      Use CLIP gap detection to find visually matching frames.
+        query_text = question
+        if summary_mode:
+            transcript_text = _load_transcript_text(current_video_id)
+            if transcript_text:
+                answer_language = _detect_transcript_language(transcript_text)
+            query_text = _summary_query_for_language(answer_language)
 
-    TEXT_MIN_SCORE = 0.50   # SBERT cosine threshold to consider a text hit relevant
-    CLIP_MIN_SCORE = 0.18   # hard floor for CLIP-only results
+        query_embedding = embed_query(query_text)
+        text_results = search_text(query_embedding, limit=12, video_id=current_video_id)
 
-    strong_text = [r for r in text_results if r.score >= TEXT_MIN_SCORE]
-    print(f"Strong text hits: {len(strong_text)}  "
-          f"top score={text_results[0].score:.4f}" if text_results else "")
+        for result in text_results:
+            print(result.payload)
 
-    if strong_text and frame_candidates:
-        # Map each text segment to its nearest frame (by timestamp distance)
-        selected: dict = {}
-        for seg in strong_text:
-            mid = ((seg.payload.get("start") or 0) + (seg.payload.get("end") or 0)) / 2
-            closest = min(
-                frame_candidates,
-                key=lambda f: abs((f.payload.get("timestamp") or 0) - mid),
+        CONTEXT_MIN_SCORE = 0.18 if summary_mode else 0.30
+        context_candidates = [r for r in text_results if r.score >= CONTEXT_MIN_SCORE] or text_results[:1]
+        sorted_results = sorted(context_candidates, key=lambda r: r.payload.get("start") or 0)
+
+        def _format_ts(seconds):
+            if seconds is None:
+                return "?"
+            minutes, secs = divmod(int(seconds), 60)
+            return f"{minutes}:{secs:02d}"
+
+        context = "\n".join(
+            f"[{_format_ts(r.payload.get('start'))}-{_format_ts(r.payload.get('end'))}] {r.payload.get('text', '').strip()}"
+            for r in sorted_results
+            if r.payload.get("text")
+        )
+        print("Context:", context)
+
+        if summary_mode and context:
+            answer_language = _detect_transcript_language(context)
+
+        transcript_available = bool(context.strip())
+
+        try:
+            answer = ask_llama(
+                question=question,
+                context=context,
+                history=history,
+                answer_language=answer_language,
+                summary_mode=summary_mode,
+                transcript_available=transcript_available,
             )
-            selected[closest.id] = closest  # deduplicate via dict
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"LLM provider error: {e}")
 
-        relevant_frames = sorted(selected.values(),
-                                 key=lambda r: r.payload.get("timestamp") or 0)
-    else:
-        # Visual query -- use CLIP gap detection
-        if len(frame_candidates) >= 2:
-            scores = [r.score for r in frame_candidates]
-            gaps = [scores[i] - scores[i + 1] for i in range(len(scores) - 1)]
-            largest_gap_pos = gaps.index(max(gaps))
-            cutoff = scores[largest_gap_pos + 1]
-            relevant_frames = [
-                r for r in frame_candidates
-                if r.score > cutoff and r.score >= CLIP_MIN_SCORE
-            ]
-            if not relevant_frames and frame_candidates[0].score >= CLIP_MIN_SCORE:
-                relevant_frames = [frame_candidates[0]]
+        print(answer)
+
+        frame_query_text = _clip_query_for_summary() if summary_mode else query_text
+        frame_query_embedding = embed_text_clip(frame_query_text)
+        frame_candidates = search_frames(frame_query_embedding, limit=20, video_id=current_video_id)
+
+        for r in frame_candidates:
+            print(f"CLIP score={r.score:.4f}  {r.payload.get('frame')}")
+
+        TEXT_MIN_SCORE = 0.50
+        CLIP_MIN_SCORE = 0.18
+
+        strong_text = [r for r in text_results if r.score >= TEXT_MIN_SCORE]
+        print(f"Strong text hits: {len(strong_text)}  "
+              f"top score={text_results[0].score:.4f}" if text_results else "")
+
+        if strong_text and frame_candidates:
+            selected: dict = {}
+            for seg in strong_text:
+                mid = ((seg.payload.get("start") or 0) + (seg.payload.get("end") or 0)) / 2
+                closest = min(
+                    frame_candidates,
+                    key=lambda f: abs((f.payload.get("timestamp") or 0) - mid),
+                )
+                selected[closest.id] = closest
+
+            relevant_frames = sorted(selected.values(), key=lambda r: r.payload.get("timestamp") or 0)
         else:
-            relevant_frames = [r for r in frame_candidates if r.score >= CLIP_MIN_SCORE]
+            if len(frame_candidates) >= 2:
+                scores = [r.score for r in frame_candidates]
+                gaps = [scores[i] - scores[i + 1] for i in range(len(scores) - 1)]
+                largest_gap_pos = gaps.index(max(gaps))
+                cutoff = scores[largest_gap_pos + 1]
+                relevant_frames = [
+                    r for r in frame_candidates
+                    if r.score > cutoff and r.score >= CLIP_MIN_SCORE
+                ]
+                if not relevant_frames and frame_candidates[0].score >= CLIP_MIN_SCORE:
+                    relevant_frames = [frame_candidates[0]]
+            else:
+                relevant_frames = [r for r in frame_candidates if r.score >= CLIP_MIN_SCORE]
 
-    for r in relevant_frames:
-        ts = r.payload.get("timestamp")
-        ts_str = f"{ts:.2f}" if ts is not None else "N/A"
-        print(f"-> frame: {r.payload.get('frame')}  ts={ts_str}")
+        for r in relevant_frames:
+            ts = r.payload.get("timestamp")
+            ts_str = f"{ts:.2f}" if ts is not None else "N/A"
+            print(f"-> frame: {r.payload.get('frame')}  ts={ts_str}")
 
-    # Surface only the two most relevant text segments (text_results is already
-    # sorted by Qdrant similarity score, descending), then order those
-    # chronologically so the frontend shows them in the order they occur.
-    top_matches = sorted(text_results, key=lambda r: r.score, reverse=True)[:2]
-    answer_timestamps = sorted(
-        [
-            {"start": r.payload.get("start"), "end": r.payload.get("end")}
-            for r in top_matches
-            if r.payload.get("start") is not None
-        ],
-        key=lambda t: t["start"],
-    )
+        top_matches = sorted(text_results, key=lambda r: r.score, reverse=True)[:2]
+        answer_timestamps = sorted(
+            [
+                {"start": r.payload.get("start"), "end": r.payload.get("end")}
+                for r in top_matches
+                if r.payload.get("start") is not None
+            ],
+            key=lambda t: t["start"],
+        )
 
-    return {
-        "answer": answer,
-        "timestamps": answer_timestamps,
-        "text_results": [
-            {
-                "text": r.payload.get("text"),
-                "start": r.payload.get("start"),
-                "end": r.payload.get("end"),
-                "score": r.score,
-            }
-            for r in text_results
-        ],
-        "frame_results": [
-            {
-                "frame": r.payload.get("frame"),
-                "timestamp": r.payload.get("timestamp"),
-                "score": r.score,
-            }
-            for r in relevant_frames
-        ],
-    }
-  except HTTPException:
-    raise
-  except Exception as exc:
-    import traceback
-    traceback.print_exc()
-    raise HTTPException(status_code=500, detail=str(exc))
+        return {
+            "answer": answer,
+            "timestamps": answer_timestamps,
+            "text_results": [
+                {
+                    "text": r.payload.get("text"),
+                    "start": r.payload.get("start"),
+                    "end": r.payload.get("end"),
+                    "score": r.score,
+                }
+                for r in text_results
+            ],
+            "frame_results": [
+                {
+                    "frame": r.payload.get("frame"),
+                    "timestamp": r.payload.get("timestamp"),
+                    "score": r.score,
+                }
+                for r in relevant_frames
+            ],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))

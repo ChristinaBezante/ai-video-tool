@@ -1,6 +1,90 @@
 import re
+import math
+import wave
 import ffmpeg
 from pathlib import Path
+
+
+def _probe_duration_seconds(video_path: Path):
+    try:
+        probe = ffmpeg.probe(str(video_path))
+        duration = probe.get("format", {}).get("duration")
+        return float(duration) if duration is not None else None
+    except Exception:
+        return None
+
+
+def _write_silence_wav(path: Path, duration_seconds: float, sample_rate: int = 16000):
+    frame_count = max(0, int(duration_seconds * sample_rate))
+    silence = b"\x00\x00" * frame_count
+
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(silence)
+
+
+def _concat_wav_files(parts: list[Path], output_audio: Path):
+    if not parts:
+        raise RuntimeError("No WAV parts to concatenate")
+
+    with wave.open(str(parts[0]), "rb") as first:
+        params = first.getparams()
+
+    with wave.open(str(output_audio), "wb") as out:
+        out.setparams(params)
+        for part in parts:
+            with wave.open(str(part), "rb") as src:
+                out.writeframes(src.readframes(src.getnframes()))
+
+
+def _extract_audio_chunked_with_silence(video_path: Path, output_audio: Path, chunk_seconds: int = 60):
+    duration = _probe_duration_seconds(video_path)
+    if not duration or duration <= 0:
+        raise RuntimeError("Could not determine video duration for chunked fallback")
+
+    total_chunks = int(math.ceil(duration / float(chunk_seconds)))
+    temp_parts = []
+
+    try:
+        for index in range(total_chunks):
+            start = index * chunk_seconds
+            length = min(float(chunk_seconds), duration - start)
+            part_path = output_audio.parent / f"{output_audio.stem}.part{index:04d}.wav"
+
+            try:
+                (
+                    ffmpeg
+                    .input(
+                        str(video_path),
+                        ss=start,
+                        t=length,
+                        err_detect="ignore_err",
+                        fflags="+discardcorrupt",
+                    )
+                    .output(
+                        str(part_path),
+                        acodec="pcm_s16le",
+                        ac=1,
+                        ar=16000,
+                    )
+                    .overwrite_output()
+                    .run(capture_stdout=True, capture_stderr=True)
+                )
+
+                if not part_path.exists() or part_path.stat().st_size == 0:
+                    raise RuntimeError("chunk output was empty")
+            except Exception:
+                _write_silence_wav(part_path, duration_seconds=length)
+
+            temp_parts.append(part_path)
+
+        _concat_wav_files(temp_parts, output_audio)
+        print("Audio extracted with chunked corruption-tolerant fallback.")
+    finally:
+        for part_path in temp_parts:
+            part_path.unlink(missing_ok=True)
 
 def normalize_video(video_path, normalized_dir, force=False):
     """
@@ -48,24 +132,38 @@ def normalize_video(video_path, normalized_dir, force=False):
 
     output_path = normalized_dir / f"{video_path.stem}_normalized.mp4"
 
+    attempts = [
+        {},
+        {"err_detect": "ignore_err"},
+        {"err_detect": "ignore_err", "fflags": "+discardcorrupt"},
+    ]
+
+    last_error = None
+
     print("Normalizing video...")
 
-    (
-        ffmpeg
-        .input(str(video_path))
-        .output(
-            str(output_path),
-            vcodec="libx264",
-            acodec="aac",
-            movflags="+faststart"
-        )
-        .overwrite_output()
-        .run()
-    )
+    for kwargs in attempts:
+        try:
+            (
+                ffmpeg
+                .input(str(video_path), **kwargs)
+                .output(
+                    str(output_path),
+                    vcodec="libx264",
+                    acodec="aac",
+                    movflags="+faststart"
+                )
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
 
-    print(f"Normalized video saved to {output_path}")
+            print(f"Normalized video saved to {output_path}")
+            return output_path
+        except ffmpeg.Error as e:
+            last_error = e
 
-    return output_path
+    stderr = last_error.stderr.decode(errors="replace") if last_error and last_error.stderr else str(last_error)
+    raise RuntimeError(f"Could not normalize video: {stderr}")
 
 
 def extract_audio(video_path, output_audio):
@@ -101,8 +199,12 @@ def extract_audio(video_path, output_audio):
         except ffmpeg.Error as e:
             last_error = e
 
-    stderr = last_error.stderr.decode(errors="replace")
-    raise RuntimeError(stderr)
+    try:
+        _extract_audio_chunked_with_silence(Path(video_path), Path(output_audio))
+        return
+    except Exception as chunk_error:
+        stderr = last_error.stderr.decode(errors="replace") if last_error and last_error.stderr else str(last_error)
+        raise RuntimeError(f"{stderr}\nChunked fallback failed: {chunk_error}")
 
 
 _PTS_TIME_RE = re.compile(r"pts_time:([0-9.]+)")

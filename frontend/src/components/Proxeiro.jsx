@@ -13,7 +13,14 @@ import {
     Volume2,
     VolumeX,
     Maximize2,
+    X,
 } from 'lucide-react';
+
+const YtIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8zM9.75 15.5v-7l6.5 3.5-6.5 3.5z"/>
+    </svg>
+);
 //pip install "fastapi[standard]"
 //to run fastapi dev main.py
 //npm i video.js
@@ -26,9 +33,12 @@ const Proxeiro = () => {
     const [uploadProgress, setUploadProgres] = useState(0);
     const [backendProgress, setBackendProgress] = useState(0);
     const [uploadedFileURL, setUploadedFileURL] = useState(null);
+    const [currentVideoId, setCurrentVideoId] = useState(null);
     const [uploadError, setUploadError] = useState('');
     const [isUploading, setIsUploading] = useState(false);
     const [processingStage, setProcessingStage] = useState('idle');
+    const [showYoutubeInput, setShowYoutubeInput] = useState(false);
+    const [youtubeUrl, setYoutubeUrl] = useState('');
     const [isPlaying, setIsPlaying] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -77,6 +87,7 @@ const Proxeiro = () => {
                 const result = data?.result || {};
                 const fileUrl = `http://localhost:8000${result.file_url}?t=${Date.now()}`;
                 setUploadedFileURL(fileUrl);
+                setCurrentVideoId(result.video_id ?? null);
                 return;
             }
 
@@ -100,6 +111,7 @@ const Proxeiro = () => {
             setIsUploading(true);
             setUploadError('');
             setUploadedFileURL(null);
+            setCurrentVideoId(null);
             setIsPlaying(false);
             setCurrentTime(0);
             setDuration(0);
@@ -125,6 +137,7 @@ const Proxeiro = () => {
                 // Backward-compatible path for synchronous backend responses.
                 const fileUrl = `http://localhost:8000${response.data.file_url}?t=${Date.now()}`;
                 setUploadedFileURL(fileUrl);
+                setCurrentVideoId(response?.data?.video_id ?? null);
                 setBackendProgress(100);
                 setProcessingStage('completed');
             } else {
@@ -205,6 +218,39 @@ const Proxeiro = () => {
 
         await uploadVideo(file);
     }
+
+    const submitYoutubeUrl = async (event) => {
+        event.preventDefault();
+        const url = youtubeUrl.trim();
+        if (!url) return;
+
+        try {
+            setIsUploading(true);
+            setUploadError('');
+            setUploadedFileURL(null);
+            setCurrentVideoId(null);
+            setIsPlaying(false);
+            setCurrentTime(0);
+            setDuration(0);
+            setProcessingStage('downloading');
+            setBackendProgress(3);
+
+            const response = await axios.post('http://localhost:8000/download-youtube/', { url });
+            const jobId = response?.data?.job_id;
+            if (!jobId) throw new Error('No job_id returned from server');
+
+            setShowYoutubeInput(false);
+            setYoutubeUrl('');
+            await pollUploadStatus(jobId);
+            setBackendProgress(100);
+            setProcessingStage('completed');
+        } catch (error) {
+            setUploadError(error?.response?.data?.detail || error?.message || 'YouTube download failed.');
+            setProcessingStage('failed');
+        } finally {
+            setIsUploading(false);
+        }
+    };
 
     //https://medium.com/@codeawake/ai-chatbot-frontend-1823b9c78521
     //https://github.com/ruizguille/tech-trends-chatbot
@@ -366,6 +412,46 @@ const Proxeiro = () => {
                                 <span className="upload-dropzone-copy">Supports video files and sends them directly to the backend processing pipeline.</span>
                             </button>
 
+                            {showYoutubeInput ? (
+                                <div className="yt-inline-form">
+                                    <span className="yt-inline-icon"><YtIcon /></span>
+                                    <input
+                                        className="yt-inline-input"
+                                        type="url"
+                                        placeholder="Paste a YouTube URL…"
+                                        value={youtubeUrl}
+                                        onChange={(e) => setYoutubeUrl(e.target.value)}
+                                        autoFocus
+                                        onKeyDown={(e) => e.key === 'Enter' && submitYoutubeUrl(e)}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="yt-inline-submit"
+                                        onClick={submitYoutubeUrl}
+                                        disabled={!youtubeUrl.trim() || isUploading}
+                                    >
+                                        {isUploading ? <LoaderCircle className="spin" size={15} /> : <ChevronRight size={15} />}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="yt-inline-close"
+                                        onClick={() => { setShowYoutubeInput(false); setYoutubeUrl(''); }}
+                                    >
+                                        <X size={15} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="yt-open-btn"
+                                    onClick={() => setShowYoutubeInput(true)}
+                                    disabled={isUploading}
+                                >
+                                    <YtIcon />
+                                    Import from YouTube
+                                </button>
+                            )}
+
                             <div className="upload-form-footer">
                                 <div className="upload-file-meta">
                                     <span className="upload-file-label">Selected file</span>
@@ -465,7 +551,7 @@ const Proxeiro = () => {
                 {uploadedFileURL ? (
                     <div className="upload-chat-shell upload-chat-shell-inline">
                         <div className='chat-panel'>
-                            <ChatBot onSeek={seekTo}/>
+                            <ChatBot onSeek={seekTo} videoId={currentVideoId} />
                         </div>
                     </div>
                 ) : null}

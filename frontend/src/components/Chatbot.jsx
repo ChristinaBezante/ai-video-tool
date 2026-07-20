@@ -7,10 +7,18 @@ import ChatMessages from './ChatMessages';
 import ChatInput from './ChatInput';
 import '../styles/chatbot.css';
 
-function Chatbot({ onSeek }) {
+const QUICK_ACTIONS = [
+  {
+    label: 'Summarize this video',
+    prompt: 'Summarize this video',
+  },
+];
+
+function Chatbot({ onSeek, videoId }) {
   const [chatId, setChatId] = useState(null);
   const [messages, setMessages] = useImmer([]);
   const [newMessage, setNewMessage] = useState('');
+  const [showQuickActions, setShowQuickActions] = useState(true);
 
   const isLoading =
     messages.length && messages[messages.length - 1].loading;
@@ -19,6 +27,10 @@ function Chatbot({ onSeek }) {
     const trimmedMessage = (overrideText ?? newMessage).trim();
 
     if (!trimmedMessage || isLoading) return;
+
+    if (trimmedMessage.toLowerCase() === 'summarize this video') {
+      setShowQuickActions(false);
+    }
 
     // Add user message
     setMessages((draft) => {
@@ -37,6 +49,15 @@ function Chatbot({ onSeek }) {
     setNewMessage("");
 
     try {
+      // Send recent prior turns so the backend/LLM can handle follow-up
+      // questions ("what about that?") instead of treating every question
+      // in isolation. Exclude loading/error placeholders -- only real
+      // exchanged content is useful context.
+      const history = messages
+        .filter((m) => !m.loading && !m.error && m.content)
+        .map((m) => ({ role: m.role, content: m.content }))
+        .slice(-6);
+
       const response = await fetch("http://localhost:8000/ask", {
         method: "POST",
         headers: {
@@ -44,6 +65,8 @@ function Chatbot({ onSeek }) {
         },
         body: JSON.stringify({
           question: trimmedMessage,
+          video_id: videoId,
+          history,
         }),
       });
 
@@ -95,6 +118,22 @@ function Chatbot({ onSeek }) {
       </div>
 
       {!isEmpty && <ChatMessages messages={messages} isLoading={isLoading} onSeek={onSeek} />}
+
+      {showQuickActions && (
+        <div className="chatbot-quick-actions" aria-label="Quick actions">
+          {QUICK_ACTIONS.map(({ label, prompt }) => (
+            <button
+              key={label}
+              type="button"
+              className="chatbot-quick-action"
+              onClick={() => submitNewMessage(prompt)}
+              disabled={isLoading}
+            >
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {isEmpty && <div className="chatbot-empty-spacer" />}
 

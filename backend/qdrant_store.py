@@ -114,26 +114,49 @@ def store_frame_embeddings(video_id: str, frame_results: list[dict]):
         )
 
 
-def search_text(query_embedding: list[float], limit: int = 5):
+def search_text(query_embedding: list[float], limit: int = 5, video_id: str | None = None):
+    query_filter = None
+    if video_id:
+        query_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="video_id",
+                    match=models.MatchValue(value=video_id),
+                )
+            ]
+        )
 
     results = client.query_points(
         collection_name=TEXT_COLLECTION,
         query=query_embedding,
         limit=limit,
         with_payload=True,
+        query_filter=query_filter,
     )
 
     return results.points
 
 
-def search_frames(query_embedding: list[float], limit: int = 5):
+def search_frames(query_embedding: list[float], limit: int = 5, video_id: str | None = None):
     """Search the frame collection using a 512-dim CLIP text embedding."""
+
+    query_filter = None
+    if video_id:
+        query_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="video_id",
+                    match=models.MatchValue(value=video_id),
+                )
+            ]
+        )
 
     results = client.query_points(
         collection_name=FRAME_COLLECTION,
         query=query_embedding,
         limit=limit,
         with_payload=True,
+        query_filter=query_filter,
     )
 
     return results.points

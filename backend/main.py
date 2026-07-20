@@ -12,7 +12,7 @@ import uuid
 from bert import create_embeddings_from_transcript, embed_query
 from frame_embeddings import create_frame_embeddings, embed_text_clip
 from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings, clear_collections
-from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION, search_text, search_frames
+from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION, search_text, search_frames, scroll_all_text
 
 from llama import ask_llama
 
@@ -736,22 +736,36 @@ async def ask(req: Question):
         summary_mode = _is_summary_request(question)
         answer_language = _detect_question_language(question)
 
-        query_text = question
         if summary_mode:
-            transcript_text = _load_transcript_text(current_video_id)
+            # For summaries, fetch ALL stored segments in chronological order
+            # instead of doing a single semantic search — that way the LLM
+            # sees the whole video, not just segments close to the word
+            # "summary" in embedding space.
+            all_segments = scroll_all_text(video_id=current_video_id)
+            transcript_text = " ".join(
+                (p.payload.get("text") or "").strip()
+                for p in all_segments
+                if (p.payload.get("text") or "").strip()
+            )
             if transcript_text:
                 answer_language = _detect_transcript_language(transcript_text)
-            query_text = _summary_query_for_language(answer_language)
 
-        query_embedding = embed_query(query_text)
-        text_results = search_text(query_embedding, limit=12, video_id=current_video_id)
+            # Cap at 120 segments so we stay within context window; they are
+            # already sorted chronologically so even-spacing gives coverage.
+            if len(all_segments) > 120:
+                step = len(all_segments) / 120
+                all_segments = [all_segments[int(i * step)] for i in range(120)]
 
-        for result in text_results:
-            print(result.payload)
-
-        CONTEXT_MIN_SCORE = 0.18 if summary_mode else 0.30
-        context_candidates = [r for r in text_results if r.score >= CONTEXT_MIN_SCORE] or text_results[:1]
-        sorted_results = sorted(context_candidates, key=lambda r: r.payload.get("start") or 0)
+            text_results = all_segments
+            sorted_results = all_segments
+        else:
+            query_embedding = embed_query(question)
+            text_results = search_text(query_embedding, limit=12, video_id=current_video_id)
+            CONTEXT_MIN_SCORE = 0.15
+            context_candidates = [
+                r for r in text_results if r.score >= CONTEXT_MIN_SCORE
+            ] or text_results[:4]
+            sorted_results = sorted(context_candidates, key=lambda r: r.payload.get("start") or 0)
 
         def _format_ts(seconds):
             if seconds is None:
@@ -781,11 +795,12 @@ async def ask(req: Question):
                 transcript_available=transcript_available,
             )
         except Exception as e:
+            print(f"LLM error: {e}")
             raise HTTPException(status_code=502, detail=f"LLM provider error: {e}")
 
         print(answer)
 
-        frame_query_text = _clip_query_for_summary() if summary_mode else query_text
+        frame_query_text = _clip_query_for_summary() if summary_mode else question
         frame_query_embedding = embed_text_clip(frame_query_text)
         frame_candidates = search_frames(frame_query_embedding, limit=20, video_id=current_video_id)
 
@@ -795,9 +810,12 @@ async def ask(req: Question):
         TEXT_MIN_SCORE = 0.50
         CLIP_MIN_SCORE = 0.18
 
-        strong_text = [r for r in text_results if r.score >= TEXT_MIN_SCORE]
-        print(f"Strong text hits: {len(strong_text)}  "
-              f"top score={text_results[0].score:.4f}" if text_results else "")
+        # scroll results (summary mode) have no .score attribute
+        strong_text = [r for r in text_results if getattr(r, 'score', 1.0) >= TEXT_MIN_SCORE]
+        if text_results:
+            top_score = getattr(text_results[0], 'score', None)
+            score_str = f"top score={top_score:.4f}" if top_score is not None else "(no scores)"
+            print(f"Strong text hits: {len(strong_text)}  {score_str}")
 
         if strong_text and frame_candidates:
             selected: dict = {}
@@ -830,7 +848,7 @@ async def ask(req: Question):
             ts_str = f"{ts:.2f}" if ts is not None else "N/A"
             print(f"-> frame: {r.payload.get('frame')}  ts={ts_str}")
 
-        top_matches = sorted(text_results, key=lambda r: r.score, reverse=True)[:2]
+        top_matches = sorted(text_results, key=lambda r: getattr(r, 'score', 0), reverse=True)[:2]
         answer_timestamps = sorted(
             [
                 {"start": r.payload.get("start"), "end": r.payload.get("end")}
@@ -848,7 +866,7 @@ async def ask(req: Question):
                     "text": r.payload.get("text"),
                     "start": r.payload.get("start"),
                     "end": r.payload.get("end"),
-                    "score": r.score,
+                    "score": getattr(r, 'score', None),
                 }
                 for r in text_results
             ],

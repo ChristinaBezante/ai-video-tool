@@ -57,12 +57,15 @@ const Proxeiro = () => {
     }, []);
 
     const stageLabel = (stage) => {
-        if (stage === 'extracting_audio') return 'Processing: extracting audio...';
-        //if (stage === 'transcribing') return 'Processing: transcribing audio...';
-        //if (stage === 'extracting_frames') return 'Processing: extracting frames...';
-        if (stage === 'queued') return 'Processing queued...';
-        if (stage === 'completed') return 'Processing completed.';
-        if (stage === 'failed') return 'Processing failed.';
+        if (stage === 'extracting_audio') return '🎵 Extracting audio...';
+        if (stage === 'transcribing_audio') return '📝 Transcribing (this may take a minute)...';
+        if (stage === 'embedding_text') return '🧠 Creating embeddings...';
+        if (stage === 'downloading') return '📥 Downloading from YouTube...';
+        if (stage === 'processing_audio_and_frames') return '⚙️ Processing audio...';
+        if (stage === 'queued') return '⏳ Queued for processing...';
+        if (stage === 'finalizing') return '✨ Finalizing...';
+        if (stage === 'completed') return '✅ Done!';
+        if (stage === 'failed') return '❌ Processing failed.';
         return '';
     };
 
@@ -469,9 +472,9 @@ const Proxeiro = () => {
                                     <span>{displayProgress}%</span>
                                 </div>
                                 <progress value={displayProgress} max="100"></progress>
-                                {isUploading && processingStage !== 'uploading' ? (
+                                {stageLabel(processingStage) && (
                                     <p className="upload-file-label">{stageLabel(processingStage)}</p>
-                                ) : null}
+                                )}
                             </div>
 
                             {uploadError ? <p className="upload-error">{uploadError}</p> : null}

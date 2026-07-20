@@ -374,11 +374,7 @@ def _set_job_status(job_id, status=None, stage=None, progress=None, error=None, 
 def _run_audio_pipeline(video_path: Path, output_audio: Path):
     """Extract audio, transcribe it, and create/store text embeddings.
 
-    Runs on its own thread inside _process_upload_job, in parallel with
-    _run_frame_pipeline. Transcription/embedding failures are caught and
-    returned as an error string rather than raised, so a flaky ASR call
-    doesn't take down frame processing too -- frames and audio are each
-    useful on their own.
+    Runs with detailed progress tracking.
     """
     transcript_error = None
     transcript_for_json = {"segments": []}
@@ -386,11 +382,12 @@ def _run_audio_pipeline(video_path: Path, output_audio: Path):
 
     try:
         extract_audio(video_path, output_audio)
+        print(f"✓ Audio extraction complete for {video_path.stem}")
     except RuntimeError as e:
-        print(f"Direct audio extraction failed for {video_path.stem}: {e}")
+        print(f"✗ Direct audio extraction failed for {video_path.stem}: {e}")
         try:
             normalized_video = normalize_video(video_path, NORMALIZED_DIR, force=True)
-            print(f"Retrying audio extraction from normalized video: {normalized_video}")
+            print(f"↻ Retrying audio extraction from normalized video: {normalized_video}")
             extract_audio(normalized_video, output_audio)
         except Exception as normalize_error:
             transcript_error = f"Could not extract audio: {normalize_error}"
@@ -399,13 +396,18 @@ def _run_audio_pipeline(video_path: Path, output_audio: Path):
 
     try:
         if output_audio and Path(output_audio).exists():
+            print(f"✓ Starting transcription for {video_path.stem}...")
             transcript = transcribe_audio_chunks(str(output_audio))
             transcript_for_json = _compact_transcript_for_json(transcript)
+            print(f"✓ Transcription complete: {len(transcript_for_json.get('segments', []))} segments")
+            
+            print(f"↻ Creating text embeddings...")
             embeddings = create_embeddings_from_transcript(transcript_for_json)
             store_text_embeddings(video_path.stem, embeddings)
+            print(f"✓ Embeddings stored: {len(embeddings)} vectors")
     except Exception as e:
         transcript_error = str(e)
-        print(f"Transcription/embedding failed for {video_path.stem}, continuing without it: {e}")
+        print(f"✗ Transcription/embedding failed for {video_path.stem}: {e}")
 
     return transcript_for_json, embeddings, transcript_error
 
@@ -468,39 +470,16 @@ def _process_upload_job(
         _clear_previous_uploads(video_path.name)
 
         output_audio = AUDIO_DIR / f"{video_path.stem}.wav"
-        output_frames_dir = FRAMES_DIR / video_path.stem
 
-        # Audio (extract -> transcribe -> embed) and frames (extract -> CLIP
-        # embed) don't depend on each other, so run them concurrently instead
-        # of sequentially. This is the main lever for cutting total upload
-        # processing time, since the audio pipeline is network/ASR-bound and
-        # the frame pipeline is CPU/GPU-bound -- they don't compete for the
-        # same resource.
-        _set_job_status(job_id, status="processing", stage="processing_audio_and_frames", progress=20)
+        # Only extract and process audio (no frame extraction for speed)
+        _set_job_status(job_id, status="processing", stage="extracting_audio", progress=25)
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            audio_future = executor.submit(_run_audio_pipeline, video_path, output_audio)
-            frame_future = executor.submit(
-                _run_frame_pipeline,
-                video_path,
-                output_frames_dir,
-                frame_interval_sec,
-                frame_strategy,
-                scene_threshold,
-                keyframes_only,
-                frame_max_width,
-            )
-
-            # .result() blocks until that future's thread finishes, but both
-            # threads are already running concurrently by this point.
-            transcript_for_json, embeddings, transcript_error = audio_future.result()
-            frame_count, frame_embeddings = frame_future.result()
+        transcript_for_json, embeddings, transcript_error = _run_audio_pipeline(video_path, output_audio)
 
         _set_job_status(job_id, status="processing", stage="finalizing", progress=95)
 
         _update_shared_json(TRANSCRIPTS_PATH, transcript_for_json)
         _update_shared_json(EMBEDDINGS_PATH, embeddings)
-        _update_shared_json(FRAME_EMBEDDINGS_PATH, frame_embeddings)
 
         result = {
             "filename": filename,
@@ -509,18 +488,9 @@ def _process_upload_job(
             "video_id": video_path.stem,
             "transcript_url": "/audio/output.json",
             "embeddings_url": "/audio/output_embeddings.json",
-            "frame_embeddings_url": "/frames/output_frame_embeddings.json",
             "transcript": transcript_for_json,
             "transcript_error": transcript_error,
-            "frame_count": frame_count,
-            "frames_url_prefix": f"/frames/{video_path.stem}/",
-            "frame_settings": {
-                "interval_seconds": frame_interval_sec,
-                "strategy": frame_strategy,
-                "scene_threshold": scene_threshold,
-                "keyframes_only": keyframes_only,
-                "max_width": frame_max_width,
-            },
+            "frame_count": 0,
         }
         _set_job_status(job_id, status="completed", stage="completed", progress=100, result=result)
     except Exception as e:
@@ -584,32 +554,64 @@ async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTask
             file_stem = f"yt_{uuid.uuid4().hex[:12]}"
             out_path = UPLOAD_DIR / f"{file_stem}.mp4"
 
-            result = subprocess.run(
-                [
-                    str(yt_dlp_exe),
-                    "--no-playlist",
-                    "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                    "--merge-output-format", "mp4",
-                    "-o", str(out_path),
-                    url,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
+            # Format priority: balance quality vs. speed
+            # Prefer 480p (good quality, fast) -> 360p (very fast) -> any MP4 (fastest fallback)
+            formats = [
+                "best[ext=mp4][height<=480]",     # 480p or lower (good quality, fast)
+                "best[ext=mp4][height<=360]",     # 360p (very fast fallback)
+                "best[ext=mp4]",                  # Any MP4 (fastest)
+            ]
 
-            if result.returncode != 0:
-                stderr = (result.stderr or "").strip()
+            result = None
+            for idx, fmt in enumerate(formats):
+                _set_job_status(job_id, stage="downloading", progress=5 + (idx * 2),
+                                error=f"Format {idx + 1}/{len(formats)}")
+                
+                print(f"[YouTube] Attempting format: {fmt}")
+                
+                # yt-dlp options for speed:
+                # --socket-timeout: faster failure on network issues
+                # --concurrent-fragments: parallel segment downloads (YouTube uses DASH)
+                # --no-warnings: cleaner output
+                result = subprocess.run(
+                    [
+                        str(yt_dlp_exe),
+                        "--no-playlist",
+                        "--no-warnings",
+                        "-f", fmt,
+                        "--socket-timeout", "30",
+                        "--concurrent-fragments", "4",
+                        "-o", str(out_path),
+                        url,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=180,  # 3 min per format (reduced from 5 min)
+                )
+                
+                if result.returncode == 0 and out_path.exists():
+                    file_size_mb = out_path.stat().st_size / 1024 / 1024
+                    print(f"[YouTube] Downloaded successfully: {file_size_mb:.1f} MB")
+                    break
+                elif result.returncode == 0:
+                    print(f"[YouTube] Format {idx + 1} returned 0 but file missing, trying next...")
+                    continue
+                else:
+                    stderr_snippet = (result.stderr or "")[-150:] if result.stderr else "Unknown"
+                    print(f"[YouTube] Format {idx + 1} failed: {stderr_snippet}")
+
+            if result is None or result.returncode != 0:
+                stderr = (result.stderr or "").strip() if result else "Unknown error"
                 _set_job_status(job_id, status="failed", stage="failed", progress=100,
-                                error=f"yt-dlp failed: {stderr[-600:]}")
+                                error=f"Download failed (all formats): {stderr[-200:]}")
                 return
 
             if not out_path.exists() or out_path.stat().st_size == 0:
                 _set_job_status(job_id, status="failed", stage="failed", progress=100,
-                                error="Download appeared to succeed but the output file is missing or empty")
+                                error="Download succeeded but output file is missing or empty")
                 return
 
-            _set_job_status(job_id, stage="processing_audio_and_frames", progress=20)
+            _set_job_status(job_id, stage="processing_audio_and_frames", progress=15)
             _process_upload_job(
                 job_id,
                 out_path.name,
@@ -622,7 +624,7 @@ async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTask
             )
         except subprocess.TimeoutExpired:
             _set_job_status(job_id, status="failed", stage="failed", progress=100,
-                            error="Download timed out (video may be too long or network too slow)")
+                            error="Download timed out (tried 720p → 480p → any MP4)")
         except Exception as exc:
             _set_job_status(job_id, status="failed", stage="failed", progress=100, error=str(exc))
 
@@ -641,7 +643,7 @@ async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTask
 async def create_upload_file(
     background_tasks: BackgroundTasks,
     file_upload: UploadFile,
-    frame_interval_sec: float = 5.0,
+    frame_interval_sec: float = 10.0,
     frame_strategy: str = "scene",
     scene_threshold: float = 0.35,
     keyframes_only: bool = True,

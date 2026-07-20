@@ -44,6 +44,8 @@ def _extract_audio_chunked_with_silence(video_path: Path, output_audio: Path, ch
     if not duration or duration <= 0:
         raise RuntimeError("Could not determine video duration for chunked fallback")
 
+    print(f"Video duration: {duration:.1f} seconds ({duration/60:.1f} minutes)")
+    
     total_chunks = int(math.ceil(duration / float(chunk_seconds)))
     temp_parts = []
 
@@ -73,9 +75,25 @@ def _extract_audio_chunked_with_silence(video_path: Path, output_audio: Path, ch
                     .run(capture_stdout=True, capture_stderr=True)
                 )
 
+                # Validate chunk: must have at least 50% of expected frames
+                # Expected: length * 16000 frames/second
+                expected_frames = int(length * 16000)
+                min_frames_threshold = max(expected_frames // 2, 1000)  # At least 0.5 seconds worth
+
                 if not part_path.exists() or part_path.stat().st_size == 0:
                     raise RuntimeError("chunk output was empty")
-            except Exception:
+
+                with wave.open(str(part_path), "rb") as wav_file:
+                    actual_frames = wav_file.getnframes()
+
+                print(f"  Chunk {index}: {actual_frames:7d}/{expected_frames:7d} frames ({100*actual_frames/expected_frames:5.1f}%)")
+
+                if actual_frames < min_frames_threshold:
+                    print(f"    ^ WARNING: undersized chunk, replacing with silence")
+                    raise RuntimeError(f"chunk had insufficient frames: {actual_frames} < {min_frames_threshold}")
+
+            except Exception as e:
+                print(f"  Chunk {index}: Extraction failed ({type(e).__name__}: {e}), using silence")
                 _write_silence_wav(part_path, duration_seconds=length)
 
             temp_parts.append(part_path)

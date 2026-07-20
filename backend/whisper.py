@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import time
 import wave
 from huggingface_hub import InferenceClient
@@ -11,19 +12,34 @@ import random
 
 load_dotenv()
 
+# Increase recursion limit for deep segment estimation in large videos
+sys.setrecursionlimit(5000)
+
 whisper_token = os.getenv("HF_TOKEN")
 
 MAX_SEGMENT_SECONDS = 30.0
 
-client = InferenceClient(provider="hf-inference", token=whisper_token)
+# Check for dedicated Inference Endpoint (faster, no rate limits)
+endpoint_url = os.getenv("HF_WHISPER_ENDPOINT_URL")
+endpoint_token = os.getenv("HF_WHISPER_ENDPOINT_TOKEN")
 
-CHUNK_SECONDS =  30  # 3 minutes instead of 1
+if endpoint_url and endpoint_token:
+    # Use dedicated endpoint
+    client = InferenceClient(model=endpoint_url, token=endpoint_token)
+    print("[Whisper] Using dedicated Inference Endpoint")
+else:
+    # Fall back to shared HF API
+    client = InferenceClient(provider="hf-inference", token=whisper_token)
+    print("[Whisper] Using shared HF Inference API")
+
+CHUNK_SECONDS = 60  # 60s chunks: halves the number of API calls vs 30s
 
 # The shared HF "hf-inference" endpoint is serverless infra: on a cold start
 # (or under load) it can take longer to spin up whisper-large-v3 than the
 # router's own gateway timeout allows, which surfaces as a 504 to us even
-# though the request itself was fine. Retrying with backoff smooths over
-# these transient failures without needing a dedicated Inference Endpoint.
+# though the request itself was fine. A dedicated Inference Endpoint skips
+# this entirely and has no rate limits. Retrying with backoff smooths over
+# any transient failures on either endpoint.
 ASR_MAX_RETRIES = 3
 ASR_RETRY_BACKOFF_SECONDS = 8
 _RETRYABLE_MARKERS = ("504", "502", "503", "429", "gateway", "timeout", "timed out", "rate limit")
@@ -187,44 +203,37 @@ def _estimate_segments_from_text(text, start, end, max_segment_seconds=MAX_SEGME
 
 
 def _refine_segments(segments, audio_path, fallback_text, max_segment_seconds=MAX_SEGMENT_SECONDS):
+    """
+    Only estimate segments as a fallback if we have no segments or they're invalid.
+    Trust Whisper's timestamps—don't try to recursively subdivide them (causes deep recursion).
+    """
     if not segments:
+        # No segments: estimate from full text
         duration = _wav_duration_seconds(audio_path)
         return _estimate_segments_from_text(fallback_text, 0.0, duration, max_segment_seconds=max_segment_seconds)
 
-    refined = []
+    # Filter segments: only keep those with valid text and timestamps
+    valid_segments = []
     for item in segments:
         start = item.get("start")
         end = item.get("end")
         text = (item.get("text") or "").strip()
 
         if text and isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start:
-            if end - start > max_segment_seconds:
-                refined.extend(
-                    _estimate_segments_from_text(
-                        text,
-                        float(start),
-                        float(end),
-                        max_segment_seconds=max_segment_seconds,
-                    )
-                )
-            else:
-                refined.append({
-                    "start": round(float(start), 3),
-                    "end": round(float(end), 3),
-                    "text": text,
-                })
-            continue
+            valid_segments.append({
+                "start": round(float(start), 3),
+                "end": round(float(end), 3),
+                "text": text,
+            })
 
-        refined.extend(
-            _estimate_segments_from_text(
-                text,
-                start,
-                end,
-                max_segment_seconds=max_segment_seconds,
-            )
-        )
+    # If we got valid segments from Whisper, return them as-is
+    # (don't try to recursively subdivide—that causes recursion depth errors)
+    if valid_segments:
+        return valid_segments
 
-    return refined
+    # Fallback: estimate from full text if no valid segments
+    duration = _wav_duration_seconds(audio_path)
+    return _estimate_segments_from_text(fallback_text, 0.0, duration, max_segment_seconds=max_segment_seconds)
 
 def transcribe_audio(audio_path: str):
     output = None
@@ -255,16 +264,23 @@ def transcribe_audio(audio_path: str):
     if output is None:
         raise last_exc
 
-    data = _coerce_to_dict(output)
-    segments = _refine_segments(_normalize_segments(data), audio_path, data.get("text") or "")
+    try:
+        data = _coerce_to_dict(output)
+        segments = _normalize_segments(data)
+        refined = _refine_segments(segments, audio_path, data.get("text") or "")
+    except Exception as e:
+        print(f"ERROR processing audio {audio_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
     return {
         "text": (data.get("text") or "").strip(),
-        "segments": segments,
-        "timestamps": segments,
+        "segments": refined,
+        "timestamps": refined,
     }
 
-MAX_WORKERS = 24
+MAX_WORKERS = 8  # 8 parallel workers: fast without overloading shared HF endpoint
 
 
 def transcribe_audio_chunks(audio_path):
@@ -298,17 +314,15 @@ def transcribe_audio_chunks(audio_path):
             index = futures[future]
 
             try:
-                results[index] = future.result()
-
                 result = future.result()
 
                 print(f"\nChunk {index}")
-                print("Text:", result["text"][:80])
+                print("Text:", result["text"][:80] if result["text"] else "[EMPTY]")
                 print("Segments:", len(result["segments"]))
 
                 results[index] = result
             except Exception as e:
-                print(f"Chunk {index} failed: {e}")
+                print(f"Chunk {index} failed: {type(e).__name__}: {e}")
 
     # --- retry any chunks that failed on the first pass ---
     failed_indices = [i for i in range(len(chunks)) if i not in results]
@@ -345,6 +359,21 @@ def transcribe_audio_chunks(audio_path):
 
     print("Successful chunks:", len(results))
     print("Failed chunks:", len(chunks) - len(results))
+
+    # Add placeholder segments for permanently failed chunks
+    failed_indices = [i for i in range(len(chunks)) if i not in results]
+    if failed_indices:
+        for index in sorted(failed_indices):
+            offset = index * CHUNK_SECONDS
+            all_segments.append({
+                "start": round(offset, 3),
+                "end": round(offset + CHUNK_SECONDS, 3),
+                "text": "[TRANSCRIPTION FAILED - AUDIO UNAVAILABLE]"
+            })
+        print(f"Added {len(failed_indices)} placeholder segments for failed chunks")
+
+    # Sort all segments by start time
+    all_segments.sort(key=lambda s: s.get("start", 0))
 
     # Delete temporary chunks AFTER transcription is complete
     for chunk in chunks:

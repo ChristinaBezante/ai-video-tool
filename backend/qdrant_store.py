@@ -137,6 +137,44 @@ def search_text(query_embedding: list[float], limit: int = 5, video_id: str | No
     return results.points
 
 
+def scroll_all_text(video_id: str | None = None) -> list:
+    """Return every text segment for a video, sorted by start timestamp.
+
+    Used for summary mode so we cover the entire video instead of only the
+    segments whose embedding happens to be close to the word 'summary'.
+    """
+    scroll_filter = None
+    if video_id:
+        scroll_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="video_id",
+                    match=models.MatchValue(value=video_id),
+                )
+            ]
+        )
+
+    all_points = []
+    offset = None
+
+    while True:
+        result, next_offset = client.scroll(
+            collection_name=TEXT_COLLECTION,
+            scroll_filter=scroll_filter,
+            with_payload=True,
+            with_vectors=False,
+            limit=250,
+            offset=offset,
+        )
+        all_points.extend(result)
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    all_points.sort(key=lambda p: (p.payload.get("start") or 0))
+    return all_points
+
+
 def search_frames(query_embedding: list[float], limit: int = 5, video_id: str | None = None):
     """Search the frame collection using a 512-dim CLIP text embedding."""
 

@@ -27,39 +27,58 @@ def ask_llama(
         )
     elif summary_mode:
         style_instruction = (
-            "The user is asking for a summary. Give a concise but useful "
-            "overview of the video, focusing on the main topic, the most "
-            "important events or ideas, and any noteworthy details from the "
-            "transcript. You may add brief general knowledge naturally when "
-            "it helps explain the video, but keep the answer short and "
-            "summary-like. "
+            "The user wants a summary of the entire video. You are given ALL "
+            "the transcript segments in chronological order. Write a thorough "
+            "summary that covers the main topic, every significant concept or "
+            "point the video introduces, key examples, and the overall flow. "
+            "After summarising the video content, add a short paragraph of "
+            "relevant general knowledge that gives the user useful context "
+            "about the subject matter. Keep the tone clear and educational. "
         )
     else:
         style_instruction = (
-            "Answer normally and naturally, using the transcript as the main "
-            "source while blending in helpful general knowledge where it adds "
-            "value. "
+            "Structure your answer as one educational paragraph (or a few short "
+            "paragraphs if the topic needs it). First convey what the video "
+            "explains about the topic, then enrich it with accurate general "
+            "knowledge. Where it helps understanding, include a concrete, simple "
+            "example — clearly presented but not prefaced with a label like "
+            "'Example:'. Everything should read as a single natural explanation. "
         )
 
     messages = [
         {
             "role": "system",
             "content": (
-                "You are an assistant that answers questions about a video. "
+                "You are an intelligent educational assistant. "
+                "The user is watching a video and asks questions about it. "
                 "Timestamped transcript excerpts from the video are provided "
-                "below (format \"[mm:ss-mm:ss] text\"). Write one unified "
-                "answer that blends the transcript excerpts with helpful "
-                "general knowledge naturally, without labeling the answer "
-                "into separate sections. Use the transcript excerpts as the "
-                "main source, but you may add concise background knowledge "
-                "when it helps explain the topic or fill small gaps. Do not "
-                "pretend general knowledge came from the video. If the video "
-                "does not fully cover something, weave in the extra context "
-                "smoothly and honestly. "
+                "below (format \"[mm:ss-mm:ss] text\"). "
+                "\n\nYour job:\n"
+                "1. Read the transcript excerpts carefully and identify every "
+                "relevant fact, definition, rule, or example the video provides "
+                "about the topic.\n"
+                "2. Use that video content as the foundation of your answer — "
+                "it must be the dominant source.\n"
+                "3. Expand on it with accurate general knowledge to make the "
+                "answer educational and complete.\n"
+                "4. Where useful, include a simple concrete example that "
+                "illustrates the concept — blend it naturally into the text.\n"
+                "\nRules:\n"
+                "- Never copy transcript text word-for-word; paraphrase into "
+                "clean, fluent prose.\n"
+                "- Skip any garbled or incomplete transcript segment.\n"
+                "- Never produce circular definitions (do not define a word "
+                "using the same word).\n"
+                "- Do not invent facts; if something is uncertain say so briefly.\n"
+                "- Do not label sections ('From the video:', 'Example:', etc.) — "
+                "the answer must read as one cohesive explanation.\n"
+                "- When referring to the person speaking in the video, use a "
+                "neutral term such as 'the speaker' (or the equivalent in the "
+                "response language, e.g. 'ο ομιλητής' in Greek). Never assume "
+                "or invent a role, title, or name for them.\n"
                 f"{style_instruction}"
-                "Use the prior conversation turns (if any) to understand "
-                "follow-up questions, but still ground video-specific claims "
-                "in the transcript excerpts when they exist. "
+                "Use prior conversation turns (if any) to understand follow-up "
+                "questions.\n"
                 f"Respond in {answer_language}."
             ),
         },
@@ -70,6 +89,13 @@ def ask_llama(
         content = turn.get("content")
         if role in ("user", "assistant") and content:
             messages.append({"role": role, "content": content})
+
+    # Llama-3.1-8B-Instruct has a ~8k token context window. Each token is
+    # roughly 4 chars; we reserve ~1500 tokens for system prompt + question +
+    # output, leaving ~6500 tokens (~26000 chars) for transcript context.
+    MAX_CONTEXT_CHARS = 26_000
+    if len(context) > MAX_CONTEXT_CHARS:
+        context = context[:MAX_CONTEXT_CHARS] + "\n[...transcript truncated...]"
 
     messages.append(
         {
@@ -85,8 +111,8 @@ def ask_llama(
     completion = client.chat.completions.create(
         model="meta-llama/Llama-3.1-8B-Instruct",
         messages=messages,
-        max_tokens=450,
-        temperature=0.3,
+        max_tokens=600,
+        temperature=0.25,
     )
 
     return completion.choices[0].message.content.strip()

@@ -105,11 +105,39 @@
   margin-top: 0.5rem;
 }
 
-.chat-message-timestamp {
+.chat-message-timestamp-wrapper {
   margin-top: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.chat-message-timestamp {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+}
+
+.chat-message-timestamp-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.28rem 0.7rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  background: rgba(124, 58, 237, 0.12);
+  color: #c084fc;
+  font-size: 0.72rem;
+  font-weight: 400;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  line-height: 1.2;
+}
+
+.chat-message-timestamp-toggle:hover {
+  opacity: 0.9;
 }
 
 .chat-message-timestamp-badge {

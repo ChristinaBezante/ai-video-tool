@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Markdown from 'react-markdown';
 import useAutoScroll from '../hooks/useAutoScroll';
 //import userIcon from '../icons/logo.png';
@@ -16,6 +17,14 @@ function formatTimestamp(seconds) {
 
 function ChatMessages({ messages, isLoading, onSeek }) {
   const scrollContentRef = useAutoScroll(isLoading);
+  const [expandedTimestamps, setExpandedTimestamps] = useState({});
+
+  const toggleTimestampGroup = (idx) => {
+    setExpandedTimestamps((prev) => ({
+      ...prev,
+      [idx]: !prev[idx],
+    }));
+  };
 
   return (
     <div ref={scrollContentRef} className="chat-messages">
@@ -53,17 +62,29 @@ function ChatMessages({ messages, isLoading, onSeek }) {
               </div>
 
               {role === 'assistant' && !loading && timestamps && timestamps.length > 0 && (
-                <div className="chat-message-timestamp">
-                  {timestamps.map((ts, i) => (
+                <div className="chat-message-timestamp-wrapper">
+                  <div className="chat-message-timestamp">
+                    {(expandedTimestamps[idx] ? timestamps : timestamps.slice(0, 2)).map((ts, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className="chat-message-timestamp-badge"
+                        onClick={() => onSeek && onSeek(ts.start)}
+                      >
+                        ⏱ {formatTimestamp(ts.start)}
+                      </button>
+                    ))}
+                  </div>
+
+                  {timestamps.length > 2 && (
                     <button
-                      key={i}
                       type="button"
-                      className="chat-message-timestamp-badge"
-                      onClick={() => onSeek && onSeek(ts.start)}
+                      className="chat-message-timestamp-toggle"
+                      onClick={() => toggleTimestampGroup(idx)}
                     >
-                      ⏱ {formatTimestamp(ts.start)}
+                      {expandedTimestamps[idx] ? 'Show less' : `Show all (${timestamps.length})`}
                     </button>
-                  ))}
+                  )}
                 </div>
               )}
 

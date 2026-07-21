@@ -850,7 +850,12 @@ async def ask(req: Question):
             ts_str = f"{ts:.2f}" if ts is not None else "N/A"
             print(f"-> frame: {r.payload.get('frame')}  ts={ts_str}")
 
-        top_matches = sorted(text_results, key=lambda r: getattr(r, 'score', 0), reverse=True)[:2]
+        max_response_timestamps = 8
+        top_matches = sorted(
+            text_results,
+            key=lambda r: getattr(r, 'score', 0),
+            reverse=True,
+        )[:max_response_timestamps]
         answer_timestamps = sorted(
             [
                 {"start": r.payload.get("start"), "end": r.payload.get("end")}

@@ -75,15 +75,47 @@ function Chatbot({ onSeek, videoId }) {
       }
 
       const data = await response.json();
+      const fullAnswer = data.answer ?? "";
 
       setMessages((draft) => {
         draft[draft.length - 1] = {
           role: "assistant",
-          content: data.answer,
+          content: "",
           timestamps: data.timestamps ?? [],
           loading: false,
         };
       });
+
+      if (fullAnswer) {
+        const speed = Math.max(12, Math.min(40, 1200 / Math.max(fullAnswer.length, 1)));
+        let index = 0;
+
+        const intervalId = window.setInterval(() => {
+          index += 1;
+
+          setMessages((draft) => {
+            if (draft[draft.length - 1]?.role === "assistant") {
+              draft[draft.length - 1] = {
+                ...draft[draft.length - 1],
+                content: fullAnswer.slice(0, index),
+              };
+            }
+          });
+
+          if (index >= fullAnswer.length) {
+            window.clearInterval(intervalId);
+          }
+        }, speed);
+      } else {
+        setMessages((draft) => {
+          draft[draft.length - 1] = {
+            role: "assistant",
+            content: "",
+            timestamps: data.timestamps ?? [],
+            loading: false,
+          };
+        });
+      }
 
     } catch (err) {
       console.error(err);

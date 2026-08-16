@@ -3,12 +3,13 @@ import re
 import sys
 import time
 import wave
-from huggingface_hub import InferenceClient
+import requests as _requests
 from dotenv import load_dotenv
 import math
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
+from openai import OpenAI as _OpenAI
 
 load_dotenv()
 
@@ -16,21 +17,30 @@ load_dotenv()
 sys.setrecursionlimit(5000)
 
 whisper_token = os.getenv("HF_TOKEN")
+_openai_api_key = os.getenv("OPENAI_API_KEY")
 
 MAX_SEGMENT_SECONDS = 30.0
 
-# Check for dedicated Inference Endpoint (faster, no rate limits)
-endpoint_url = os.getenv("HF_WHISPER_ENDPOINT_URL")
-endpoint_token = os.getenv("HF_WHISPER_ENDPOINT_TOKEN")
+_ASR_MODEL = "openai/whisper-large-v3-turbo"
+_HF_ASR_FALLBACK_URL = f"https://router.huggingface.co/hf-inference/models/{_ASR_MODEL}"
 
-if endpoint_url and endpoint_token:
-    # Use dedicated endpoint
-    client = InferenceClient(model=endpoint_url, token=endpoint_token)
+# OpenAI Whisper API — fastest option (truly parallel, ~2s/chunk)
+_openai_client = _OpenAI(api_key=_openai_api_key) if _openai_api_key else None
+
+# Use dedicated Inference Endpoint when configured (always warm, no rate limits)
+_endpoint_url = os.getenv("HF_WHISPER_ENDPOINT_URL")
+_endpoint_token = os.getenv("HF_WHISPER_ENDPOINT_TOKEN")
+
+if _openai_client:
+    print("[Whisper] Using OpenAI Whisper API")
+elif _endpoint_url and _endpoint_token:
+    _asr_url = _endpoint_url
+    _asr_token = _endpoint_token
     print("[Whisper] Using dedicated Inference Endpoint")
 else:
-    # Fall back to shared HF API
-    client = InferenceClient(provider="hf-inference", token=whisper_token)
-    print("[Whisper] Using shared HF Inference API")
+    _asr_url = _HF_ASR_FALLBACK_URL
+    _asr_token = whisper_token
+    print("[Whisper] Using HF Inference API (direct HTTP)")
 
 CHUNK_SECONDS = 60  # 60s chunks: halves the number of API calls vs 30s
 
@@ -41,13 +51,29 @@ CHUNK_SECONDS = 60  # 60s chunks: halves the number of API calls vs 30s
 # this entirely and has no rate limits. Retrying with backoff smooths over
 # any transient failures on either endpoint.
 ASR_MAX_RETRIES = 3
-ASR_RETRY_BACKOFF_SECONDS = 8
+ASR_RETRY_BACKOFF_SECONDS = 2  # dedicated endpoint: no cold starts
 _RETRYABLE_MARKERS = ("504", "502", "503", "429", "gateway", "timeout", "timed out", "rate limit")
 
 
 def _is_retryable_asr_error(exc):
     message = str(exc).lower()
     return any(marker in message for marker in _RETRYABLE_MARKERS)
+
+
+def _is_silent_wav(audio_path: str, silence_threshold: float = 0.001) -> bool:
+    """Return True if the WAV file is empty or near-silent (RMS < 0.1% of full scale)."""
+    import struct
+    try:
+        with wave.open(audio_path, "rb") as wav_file:
+            raw = wav_file.readframes(wav_file.getnframes())
+        if not raw or len(raw) < 2:
+            return True
+        sample_count = len(raw) // 2
+        samples = struct.unpack(f"<{sample_count}h", raw[:sample_count * 2])
+        rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
+        return (rms / 32768.0) < silence_threshold
+    except Exception:
+        return False
 
 
 def split_audio(audio_path, output_dir, chunk_seconds=CHUNK_SECONDS):
@@ -235,37 +261,67 @@ def _refine_segments(segments, audio_path, fallback_text, max_segment_seconds=MA
     duration = _wav_duration_seconds(audio_path)
     return _estimate_segments_from_text(fallback_text, 0.0, duration, max_segment_seconds=max_segment_seconds)
 
+
+def _transcribe_via_openai(audio_path: str) -> dict:
+    """Transcribe via OpenAI Whisper API — truly parallel, ~2s/chunk."""
+    with open(audio_path, "rb") as f:
+        response = _openai_client.audio.transcriptions.create(
+            model="whisper-1",
+            file=f,
+            response_format="verbose_json",
+            timestamp_granularities=["segment"],
+        )
+    return response.model_dump()
+
+
+def _transcribe_via_http(audio_path: str) -> dict:
+    """POST audio directly to the configured ASR endpoint; no InferenceClient routing."""
+    with open(audio_path, "rb") as f:
+        audio_bytes = f.read()
+    resp = _requests.post(
+        _asr_url,
+        headers={
+            "Authorization": f"Bearer {_asr_token}",
+            "Content-Type": "audio/wav",
+            "x-wait-for-model": "true",  # hold connection until model is warm instead of 503
+        },
+        data=audio_bytes,
+        timeout=300,
+    )
+    if not resp.ok:
+        print(f"[ASR] {resp.status_code}: {resp.text[:300]}")
+    resp.raise_for_status()
+    return resp.json()
+
+
 def transcribe_audio(audio_path: str):
-    output = None
+    if _is_silent_wav(audio_path):
+        print(f"transcribe_audio: skipping silent chunk {audio_path}")
+        return {"text": "", "segments": [], "timestamps": []}
+
+    data = None
     last_exc = None
 
     for attempt in range(1, ASR_MAX_RETRIES + 1):
         try:
-            output = client.automatic_speech_recognition(
-                audio_path,
-                model="openai/whisper-large-v3-turbo",
-                extra_body={
-                    "return_timestamps": True
-                }
-            )
+            data = _transcribe_via_openai(audio_path) if _openai_client else _transcribe_via_http(audio_path)
             last_exc = None
             break
         except Exception as e:
             last_exc = e
-            if attempt == ASR_MAX_RETRIES or not _is_retryable_asr_error(e):
+            if attempt == ASR_MAX_RETRIES:
                 raise
-            wait_seconds = ASR_RETRY_BACKOFF_SECONDS * attempt + random.uniform(0, 3)
+            wait_seconds = ASR_RETRY_BACKOFF_SECONDS * attempt + random.uniform(0, 2)
             print(
                 f"transcribe_audio: attempt {attempt}/{ASR_MAX_RETRIES} failed "
-                f"for {audio_path} ({e}); retrying in {wait_seconds}s..."
+                f"for {audio_path} ({type(e).__name__}: {e}); retrying in {wait_seconds:.1f}s..."
             )
             time.sleep(wait_seconds)
 
-    if output is None:
+    if data is None:
         raise last_exc
 
     try:
-        data = _coerce_to_dict(output)
         segments = _normalize_segments(data)
         refined = _refine_segments(segments, audio_path, data.get("text") or "")
     except Exception as e:
@@ -280,7 +336,7 @@ def transcribe_audio(audio_path: str):
         "timestamps": refined,
     }
 
-MAX_WORKERS = 8  # 8 parallel workers: fast without overloading shared HF endpoint
+MAX_WORKERS = 16  # OpenAI allows high concurrency; HF router: 8 is sufficient
 
 
 def transcribe_audio_chunks(audio_path):

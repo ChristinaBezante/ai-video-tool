@@ -10,3 +10,4 @@ torchvision
 pillow
 yt-dlp
 sentence-transformers
+openai

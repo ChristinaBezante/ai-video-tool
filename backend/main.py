@@ -396,15 +396,18 @@ def _run_audio_pipeline(video_path: Path, output_audio: Path):
 
     try:
         if output_audio and Path(output_audio).exists():
+            import time as _time
+            t0 = _time.perf_counter()
             print(f"✓ Starting transcription for {video_path.stem}...")
             transcript = transcribe_audio_chunks(str(output_audio))
             transcript_for_json = _compact_transcript_for_json(transcript)
-            print(f"✓ Transcription complete: {len(transcript_for_json.get('segments', []))} segments")
-            
+            print(f"✓ Transcription complete: {len(transcript_for_json.get('segments', []))} segments  [{_time.perf_counter()-t0:.1f}s]")
+
+            t1 = _time.perf_counter()
             print(f"↻ Creating text embeddings...")
             embeddings = create_embeddings_from_transcript(transcript_for_json)
             store_text_embeddings(video_path.stem, embeddings)
-            print(f"✓ Embeddings stored: {len(embeddings)} vectors")
+            print(f"✓ Embeddings stored: {len(embeddings)} vectors  [{_time.perf_counter()-t1:.1f}s]")
     except Exception as e:
         transcript_error = str(e)
         print(f"✗ Transcription/embedding failed for {video_path.stem}: {e}")
@@ -554,51 +557,55 @@ async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTask
             file_stem = f"yt_{uuid.uuid4().hex[:12]}"
             out_path = UPLOAD_DIR / f"{file_stem}.mp4"
 
-            # Format priority: balance quality vs. speed
-            # Prefer 480p (good quality, fast) -> 360p (very fast) -> any MP4 (fastest fallback)
+            # Format + player-client pairs: outer loop tries clients, inner tries formats.
+            # tv_embedded and ios bypass YouTube bot detection without needing cookies.
+            client_attempts = [
+                "tv_embedded",
+                "ios",
+                "web",
+            ]
             formats = [
-                "best[ext=mp4][height<=480]",     # 480p or lower (good quality, fast)
-                "best[ext=mp4][height<=360]",     # 360p (very fast fallback)
-                "best[ext=mp4]",                  # Any MP4 (fastest)
+                "best[height<=480]",   # any codec ≤480p
+                "best[height<=720]",   # any codec ≤720p
+                "best",                # absolute best available
             ]
 
             result = None
-            for idx, fmt in enumerate(formats):
-                _set_job_status(job_id, stage="downloading", progress=5 + (idx * 2),
-                                error=f"Format {idx + 1}/{len(formats)}")
-                
-                print(f"[YouTube] Attempting format: {fmt}")
-                
-                # yt-dlp options for speed:
-                # --socket-timeout: faster failure on network issues
-                # --concurrent-fragments: parallel segment downloads (YouTube uses DASH)
-                # --no-warnings: cleaner output
-                result = subprocess.run(
-                    [
-                        str(yt_dlp_exe),
-                        "--no-playlist",
-                        "--no-warnings",
-                        "-f", fmt,
-                        "--socket-timeout", "30",
-                        "--concurrent-fragments", "4",
-                        "-o", str(out_path),
-                        url,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=180,  # 3 min per format (reduced from 5 min)
-                )
-                
-                if result.returncode == 0 and out_path.exists():
-                    file_size_mb = out_path.stat().st_size / 1024 / 1024
-                    print(f"[YouTube] Downloaded successfully: {file_size_mb:.1f} MB")
-                    break
-                elif result.returncode == 0:
-                    print(f"[YouTube] Format {idx + 1} returned 0 but file missing, trying next...")
-                    continue
+            for client in client_attempts:
+                for idx, fmt in enumerate(formats):
+                    _set_job_status(job_id, stage="downloading", progress=5 + (idx * 2),
+                                    error=f"Trying {client}/{fmt}")
+
+                    print(f"[YouTube] Attempting client={client} format={fmt}")
+
+                    result = subprocess.run(
+                        [
+                            str(yt_dlp_exe),
+                            "--no-playlist",
+                            "--no-warnings",
+                            "-f", fmt,
+                            "--merge-output-format", "mp4",
+                            "--socket-timeout", "30",
+                            "--concurrent-fragments", "4",
+                            "--extractor-args", f"youtube:player_client={client}",
+                            "-o", str(out_path),
+                            url,
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=180,
+                    )
+
+                    if result.returncode == 0 and out_path.exists():
+                        file_size_mb = out_path.stat().st_size / 1024 / 1024
+                        print(f"[YouTube] Downloaded successfully ({client}/{fmt}): {file_size_mb:.1f} MB")
+                        break
+                    else:
+                        stderr_snippet = (result.stderr or "")[-150:] if result.stderr else "Unknown"
+                        print(f"[YouTube] {client}/{fmt} failed: {stderr_snippet}")
                 else:
-                    stderr_snippet = (result.stderr or "")[-150:] if result.stderr else "Unknown"
-                    print(f"[YouTube] Format {idx + 1} failed: {stderr_snippet}")
+                    continue  # inner loop didn't break → try next client
+                break           # inner loop broke (success) → stop outer loop too
 
             if result is None or result.returncode != 0:
                 stderr = (result.stderr or "").strip() if result else "Unknown error"

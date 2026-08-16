@@ -270,6 +270,7 @@ def _transcribe_via_openai(audio_path: str) -> dict:
             file=f,
             response_format="verbose_json",
             timestamp_granularities=["segment"],
+            timeout=60,  # fail fast instead of hanging on a stalled connection
         )
     return response.model_dump()
 

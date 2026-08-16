@@ -301,9 +301,14 @@ const Proxeiro = () => {
         player.on('pause', () => setIsPlaying(false));
         player.on('volumechange', () => setIsMuted(player.muted() || player.volume() === 0));
         player.on('loadedmetadata', () => setDuration(player.duration() || 0));
+        player.on('durationchange', () => setDuration(player.duration() || 0));
         player.on('timeupdate', () => {
             if (!isScrubbingRef.current) {
                 setCurrentTime(player.currentTime() || 0);
+            }
+            const liveDuration = player.duration();
+            if (liveDuration) {
+                setDuration((prev) => (prev === liveDuration ? prev : liveDuration));
             }
         });
     };
@@ -337,10 +342,15 @@ const Proxeiro = () => {
     const scrubToPointer = (event) => {
         const player = playerRef.current;
         const track = seekTrackRef.current;
-        if (!player || !track || !duration) return;
+        if (!player || !track) return;
+        // Read duration directly from the player instead of React state,
+        // which can lag behind (or never update) if loadedmetadata fires
+        // before this component re-renders.
+        const liveDuration = player.duration() || duration;
+        if (!liveDuration) return;
         const rect = track.getBoundingClientRect();
         const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-        const time = ratio * duration;
+        const time = ratio * liveDuration;
         setCurrentTime(time);
         player.currentTime(time);
     };

@@ -6,10 +6,18 @@ from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
-# Load once at startup; cached on disk after first download
-_model = SentenceTransformer(EMBEDDING_MODEL)
+# Loaded lazily on first use instead of at import time, so `uvicorn` starts
+# instantly; the ~5-15s model load cost is paid on the first embed call.
+_model = None
+
+
+def _get_model():
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(EMBEDDING_MODEL)
+    return _model
 
 
 def create_embeddings(transcript_json_path: str):
@@ -29,7 +37,7 @@ def create_embeddings_from_transcript(transcript: dict):
         return []
 
     # Encode all texts in one batch — orders of magnitude faster than one-by-one API calls
-    embeddings = _model.encode(texts, batch_size=64, show_progress_bar=False).tolist()
+    embeddings = _get_model().encode(texts, batch_size=64, show_progress_bar=False).tolist()
 
     results = []
     for chunk, text, embedding in zip(valid_chunks, texts, embeddings):
@@ -47,4 +55,4 @@ def create_embeddings_from_transcript(transcript: dict):
 
 
 def embed_query(question: str):
-    return _model.encode(question).tolist()
+    return _get_model().encode(question).tolist()

@@ -557,55 +557,46 @@ async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTask
             file_stem = f"yt_{uuid.uuid4().hex[:12]}"
             out_path = UPLOAD_DIR / f"{file_stem}.mp4"
 
-            # Format + player-client pairs: outer loop tries clients, inner tries formats.
-            # tv_embedded and ios bypass YouTube bot detection without needing cookies.
-            client_attempts = [
-                "tv_embedded",
-                "ios",
-                "web",
-            ]
-            formats = [
-                "best[height<=480]",   # any codec ≤480p
-                "best[height<=720]",   # any codec ≤720p
-                "best",                # absolute best available
+            # Let yt-dlp pick its own player client (its default cascade,
+            # e.g. android_vr, reliably exposes formats); forcing a fixed
+            # client list here caused "format not available" on videos those
+            # specific clients don't serve.
+            format_attempts = [
+                "bv*[height<=480]+ba/b[height<=480]/best",
+                "bv*+ba/b/best",   # no quality cap -- whatever is available
             ]
 
             result = None
-            for client in client_attempts:
-                for idx, fmt in enumerate(formats):
-                    _set_job_status(job_id, stage="downloading", progress=5 + (idx * 2),
-                                    error=f"Trying {client}/{fmt}")
+            for idx, fmt in enumerate(format_attempts):
+                _set_job_status(job_id, stage="downloading", progress=5 + (idx * 3),
+                                error=f"Trying format {idx + 1}/{len(format_attempts)}")
 
-                    print(f"[YouTube] Attempting client={client} format={fmt}")
+                print(f"[YouTube] Attempting format={fmt}")
 
-                    result = subprocess.run(
-                        [
-                            str(yt_dlp_exe),
-                            "--no-playlist",
-                            "--no-warnings",
-                            "-f", fmt,
-                            "--merge-output-format", "mp4",
-                            "--socket-timeout", "30",
-                            "--concurrent-fragments", "4",
-                            "--extractor-args", f"youtube:player_client={client}",
-                            "-o", str(out_path),
-                            url,
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=180,
-                    )
+                result = subprocess.run(
+                    [
+                        str(yt_dlp_exe),
+                        "--no-playlist",
+                        "--no-warnings",
+                        "-f", fmt,
+                        "--merge-output-format", "mp4",
+                        "--socket-timeout", "30",
+                        "--concurrent-fragments", "4",
+                        "-o", str(out_path),
+                        url,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                )
 
-                    if result.returncode == 0 and out_path.exists():
-                        file_size_mb = out_path.stat().st_size / 1024 / 1024
-                        print(f"[YouTube] Downloaded successfully ({client}/{fmt}): {file_size_mb:.1f} MB")
-                        break
-                    else:
-                        stderr_snippet = (result.stderr or "")[-150:] if result.stderr else "Unknown"
-                        print(f"[YouTube] {client}/{fmt} failed: {stderr_snippet}")
+                if result.returncode == 0 and out_path.exists():
+                    file_size_mb = out_path.stat().st_size / 1024 / 1024
+                    print(f"[YouTube] Downloaded successfully ({fmt}): {file_size_mb:.1f} MB")
+                    break
                 else:
-                    continue  # inner loop didn't break → try next client
-                break           # inner loop broke (success) → stop outer loop too
+                    stderr_snippet = (result.stderr or "")[-150:] if result.stderr else "Unknown"
+                    print(f"[YouTube] {fmt} failed: {stderr_snippet}")
 
             if result is None or result.returncode != 0:
                 stderr = (result.stderr or "").strip() if result else "Unknown error"
@@ -767,6 +758,7 @@ async def ask(req: Question):
 
             text_results = all_segments
             sorted_results = all_segments
+            context_candidates = all_segments
         else:
             query_embedding = embed_query(question)
             text_results = search_text(query_embedding, limit=12, video_id=current_video_id)
@@ -857,12 +849,36 @@ async def ask(req: Question):
             ts_str = f"{ts:.2f}" if ts is not None else "N/A"
             print(f"-> frame: {r.payload.get('frame')}  ts={ts_str}")
 
-        max_response_timestamps = 8
-        top_matches = sorted(
-            text_results,
-            key=lambda r: getattr(r, 'score', 0),
-            reverse=True,
-        )[:max_response_timestamps]
+        max_response_timestamps = 8  # hard cap so a very long tail of similar scores can't return everything
+
+        if summary_mode:
+            # Summaries intentionally cover the whole video; just cap count.
+            top_matches = sorted_results[:max_response_timestamps]
+        else:
+            # Same score-filtered set used to build the LLM's context, so
+            # badges always match what the answer was actually grounded in.
+            RELEVANT_TS_MIN_SCORE = 0.30
+            relevant_for_timestamps = [
+                r for r in context_candidates if getattr(r, "score", 0) >= RELEVANT_TS_MIN_SCORE
+            ]
+            if not relevant_for_timestamps:
+                # Nothing cleared the bar -- fall back to the single best match
+                # instead of showing no timestamps at all.
+                best = max(context_candidates, key=lambda r: getattr(r, "score", 0), default=None)
+                relevant_for_timestamps = [best] if best is not None else []
+
+            # Adaptive cutoff instead of a fixed top-N: keep every match whose
+            # score is within a relative band of the single best score. A pure
+            # "largest gap" cutoff was too fragile -- one standout top match
+            # (e.g. a near word-for-word segment) creates a huge first gap and
+            # wrongly discards a whole cluster of other equally relevant hits
+            # sitting just below it.
+            by_score = sorted(relevant_for_timestamps, key=lambda r: getattr(r, "score", 0), reverse=True)
+            RELATIVE_SCORE_BAND = 0.85  # keep anything scoring >= 85% of the top score
+            top_score = getattr(by_score[0], "score", 0) if by_score else 0
+            by_score = [r for r in by_score if getattr(r, "score", 0) >= top_score * RELATIVE_SCORE_BAND]
+            top_matches = sorted(by_score[:max_response_timestamps], key=lambda r: r.payload.get("start") or 0)
+
         answer_timestamps = sorted(
             [
                 {"start": r.payload.get("start"), "end": r.payload.get("end")}

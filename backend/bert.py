@@ -2,7 +2,6 @@ import json
 import os
 
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
@@ -16,6 +15,8 @@ _model = None
 def _get_model():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
+
         _model = SentenceTransformer(EMBEDDING_MODEL)
     return _model
 

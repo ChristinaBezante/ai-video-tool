@@ -557,13 +557,15 @@ async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTask
             file_stem = f"yt_{uuid.uuid4().hex[:12]}"
             out_path = UPLOAD_DIR / f"{file_stem}.mp4"
 
-            # Let yt-dlp pick its own player client (its default cascade,
-            # e.g. android_vr, reliably exposes formats); forcing a fixed
-            # client list here caused "format not available" on videos those
-            # specific clients don't serve.
+            # YouTube is rotating client/format availability frequently.
+            # Hard-coding a narrow stream selector (like "bv*[height<=480]+ba")
+            # makes the downloader brittle and triggers the 403s you are seeing.
+            # Prefer generic best formats first, then fall back to a more general
+            # combined-video/audio selector, instead of forcing a single client.
             format_attempts = [
-                "bv*[height<=480]+ba/b[height<=480]/best",
-                "bv*+ba/b/best",   # no quality cap -- whatever is available
+                "best[ext=mp4]/best",
+                "bestvideo+bestaudio/best",
+                "bv*+ba/b",
             ]
 
             result = None
@@ -578,8 +580,11 @@ async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTask
                         str(yt_dlp_exe),
                         "--no-playlist",
                         "--no-warnings",
+                        "--extractor-args", "youtube:player_client=android,web,ios",
                         "-f", fmt,
                         "--merge-output-format", "mp4",
+                        "--retries", "10",
+                        "--fragment-retries", "10",
                         "--socket-timeout", "30",
                         "--concurrent-fragments", "4",
                         "-o", str(out_path),

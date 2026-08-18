@@ -1,13 +1,42 @@
 import os
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
+from openai import OpenAI
 
 load_dotenv()
 
-client = InferenceClient(
-    provider="auto",
-    api_key=os.getenv("HF_TOKEN"),
-)
+_HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+_OPENAI_MODEL = "gpt-4o-mini"
+
+# Llama 3.1's officially supported languages are English, German, French,
+# Italian, Portuguese, Hindi, Spanish and Thai — Greek is not among them. On
+# Greek questions the 8B model mis-accents words ("ορίσμα" for "όρισμα"),
+# leaves dangling references and repeats itself. So OpenAI is preferred
+# whenever a key is present; HF stays as a fallback so the app still answers
+# when OpenAI is unreachable.
+_openai_api_key = os.getenv("OPENAI_API_KEY")
+_hf_token = os.getenv("HF_TOKEN")
+
+_openai_client = OpenAI(api_key=_openai_api_key) if _openai_api_key else None
+
+# Kept at module level under the old name: this client is the HF fallback.
+client = InferenceClient(provider="auto", api_key=_hf_token) if _hf_token else None
+
+if _openai_client:
+    print(f"[LLM] Using {_OPENAI_MODEL} (fallback: {_HF_MODEL})")
+elif client:
+    print(f"[LLM] Using {_HF_MODEL}")
+else:
+    print("[LLM] No OPENAI_API_KEY or HF_TOKEN set — answering is disabled")
+
+# gpt-4o-mini has a 128k-token window, so the transcript no longer has to be
+# squeezed to fit. Llama 3.1 8B has ~8k: at ~4 chars/token, 26k chars leaves
+# ~1500 tokens for the system prompt, question and output.
+_MAX_CONTEXT_CHARS = {"openai": 120_000, "hf": 26_000}
+
+_MAX_OUTPUT_TOKENS = 600
+_TEMPERATURE = 0.25
+
 
 def ask_llama(
     question: str,
@@ -67,6 +96,12 @@ def ask_llama(
                 "- Never copy transcript text word-for-word; paraphrase into "
                 "clean, fluent prose.\n"
                 "- Skip any garbled or incomplete transcript segment.\n"
+                "- Separate the video's substantive content from the speaker's "
+                "colloquial asides, jokes, visual mnemonics and figures of "
+                "speech. Never restate an aside as a definition or as a "
+                "technical property of the subject. If an aside genuinely aids "
+                "intuition, attribute it as the speaker's informal way of "
+                "describing something; otherwise leave it out.\n"
                 "- Never produce circular definitions (do not define a word "
                 "using the same word).\n"
                 "- Do not invent facts; if something is uncertain say so briefly.\n"
@@ -90,29 +125,46 @@ def ask_llama(
         if role in ("user", "assistant") and content:
             messages.append({"role": role, "content": content})
 
-    # Llama-3.1-8B-Instruct has a ~8k token context window. Each token is
-    # roughly 4 chars; we reserve ~1500 tokens for system prompt + question +
-    # output, leaving ~6500 tokens (~26000 chars) for transcript context.
-    MAX_CONTEXT_CHARS = 26_000
-    if len(context) > MAX_CONTEXT_CHARS:
-        context = context[:MAX_CONTEXT_CHARS] + "\n[...transcript truncated...]"
+    def messages_for(backend: str):
+        """Same conversation, with the transcript trimmed to that backend's window."""
+        limit = _MAX_CONTEXT_CHARS[backend]
+        trimmed = context
+        if len(trimmed) > limit:
+            trimmed = trimmed[:limit] + "\n[...transcript truncated...]"
 
-    messages.append(
-        {
-            "role": "user",
-            "content": (
-                f"Transcript excerpts:\n{context}\n\nQuestion:\n{question}"
-                if transcript_available
-                else f"Question:\n{question}"
-            ),
-        }
-    )
+        return messages + [
+            {
+                "role": "user",
+                "content": (
+                    f"Transcript excerpts:\n{trimmed}\n\nQuestion:\n{question}"
+                    if transcript_available
+                    else f"Question:\n{question}"
+                ),
+            }
+        ]
+
+    if _openai_client:
+        try:
+            completion = _openai_client.chat.completions.create(
+                model=_OPENAI_MODEL,
+                messages=messages_for("openai"),
+                max_tokens=_MAX_OUTPUT_TOKENS,
+                temperature=_TEMPERATURE,
+            )
+            return completion.choices[0].message.content.strip()
+        except Exception as e:
+            if not client:
+                raise
+            print(f"[LLM] {_OPENAI_MODEL} failed ({type(e).__name__}: {e}); falling back to {_HF_MODEL}")
+
+    if not client:
+        raise RuntimeError("No LLM backend configured: set OPENAI_API_KEY or HF_TOKEN.")
 
     completion = client.chat.completions.create(
-        model="meta-llama/Llama-3.1-8B-Instruct",
-        messages=messages,
-        max_tokens=600,
-        temperature=0.25,
+        model=_HF_MODEL,
+        messages=messages_for("hf"),
+        max_tokens=_MAX_OUTPUT_TOKENS,
+        temperature=_TEMPERATURE,
     )
 
     return completion.choices[0].message.content.strip()

@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 import sys
@@ -23,6 +24,7 @@ MAX_SEGMENT_SECONDS = 30.0
 
 _ASR_MODEL = "openai/whisper-large-v3-turbo"
 _HF_ASR_FALLBACK_URL = f"https://router.huggingface.co/hf-inference/models/{_ASR_MODEL}"
+_OPENAI_TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1")
 
 # OpenAI Whisper API — fastest option (truly parallel, ~2s/chunk)
 _openai_client = _OpenAI(api_key=_openai_api_key) if _openai_api_key else None
@@ -42,7 +44,7 @@ else:
     _asr_token = whisper_token
     print("[Whisper] Using HF Inference API (direct HTTP)")
 
-CHUNK_SECONDS = 60  # 60s chunks: halves the number of API calls vs 30s
+CHUNK_SECONDS = 30  # Whisper's reliable audio context is 30 seconds.
 
 # The shared HF "hf-inference" endpoint is serverless infra: on a cold start
 # (or under load) it can take longer to spin up whisper-large-v3 than the
@@ -58,6 +60,178 @@ _RETRYABLE_MARKERS = ("504", "502", "503", "429", "gateway", "timeout", "timed o
 def _is_retryable_asr_error(exc):
     message = str(exc).lower()
     return any(marker in message for marker in _RETRYABLE_MARKERS)
+
+
+# --- Language handling ------------------------------------------------------
+#
+# Whisper auto-detects the language of every request independently. Because we
+# transcribe 60s chunks in parallel, one video can come back with some chunks
+# read as Greek and others as Bulgarian/Russian/Turkish, which surfaces as
+# transliterated or invented text partway through the transcript. So we detect
+# the language ONCE from chunks sampled across the audio and pin it for every
+# chunk, instead of hardcoding a language and breaking the other one.
+
+SUPPORTED_LANGUAGES = ("el", "en")
+LANGUAGE_PROBE_COUNT = 3
+
+_GREEK_RANGES = (("Ͱ", "Ͽ"), ("ἀ", "῿"))
+
+_LANGUAGE_ALIASES = {
+    "el": "el", "ell": "el", "gre": "el", "greek": "el", "ελληνικά": "el",
+    "en": "en", "eng": "en", "english": "en",
+}
+
+# No prompt by default, deliberately. A prompt looks like a free accuracy win,
+# but Whisper conditions on it as if it were preceding transcript text: on a
+# quiet or low-content chunk it echoes the prompt back verbatim as the
+# "transcription". A domain-neutral instruction ("transcribe with correct
+# accents") got emitted as a real segment when tested on a 6-minute Greek
+# lesson, so the language pin carries the fix on its own.
+#
+# WHISPER_PROMPT_EL / WHISPER_PROMPT_EN opt into a prompt anyway — worth it for
+# a corpus with fixed jargon or proper nouns. Use a bare comma-separated term
+# list rather than a sentence, and note that echoed output is filtered by
+# _looks_like_prompt_echo below but can only be suppressed heuristically.
+def _prompt_for_language(language):
+    if not language:
+        return None
+    return os.getenv(f"WHISPER_PROMPT_{language.upper()}") or None
+
+
+def _normalize_for_echo_match(text):
+    return re.sub(r"\W+", " ", (text or "").lower(), flags=re.UNICODE).strip()
+
+
+def _looks_like_prompt_echo(text, prompt):
+    """True when a segment is the prompt read back instead of the actual audio."""
+    if not prompt or not text:
+        return False
+
+    normalized_prompt = _normalize_for_echo_match(prompt)
+    normalized_text = _normalize_for_echo_match(text)
+    if not normalized_prompt or not normalized_text:
+        return False
+
+    # Substring both ways: a partial echo lands inside the prompt, while a
+    # repeated echo ("<prompt>. <prompt>. ...") contains it.
+    return normalized_text in normalized_prompt or normalized_prompt in normalized_text
+
+
+def _drop_prompt_echoes(segments, prompt, audio_path):
+    if not prompt:
+        return segments
+
+    kept = [s for s in segments if not _looks_like_prompt_echo(s.get("text"), prompt)]
+    dropped = len(segments) - len(kept)
+    if dropped:
+        print(f"transcribe_audio: dropped {dropped} prompt-echo segment(s) from {audio_path}")
+    return kept
+
+
+def _normalize_language_code(value):
+    """Map a Whisper language label ('greek', 'el', ...) to 'el'/'en', else None."""
+    if not value:
+        return None
+    return _LANGUAGE_ALIASES.get(str(value).strip().lower())
+
+
+def _script_vote(text):
+    """Guess the language from the alphabet used, or None if there's too little signal."""
+    greek = latin = 0
+    for char in text or "":
+        if any(low <= char <= high for low, high in _GREEK_RANGES):
+            greek += 1
+        elif "a" <= char.lower() <= "z":
+            latin += 1
+
+    if greek + latin < 8:
+        return None
+    if greek >= latin:
+        return "el"
+    # Latin-dominant output doesn't prove English on its own (Spanish, Italian
+    # and a transliterated Greek reading all look the same here), so let the
+    # caller weigh Whisper's own label first.
+    return "en"
+
+
+def _language_from_probe(data):
+    """Infer 'el'/'en' from one unpinned transcription, or None to abstain."""
+    voted = _script_vote(data.get("text"))
+    # Greek letters can only come from a Greek reading, and mislabelled Greek
+    # audio is exactly the failure we're guarding against — so script wins here.
+    if voted == "el":
+        return "el"
+
+    reported = _normalize_language_code(data.get("language"))
+    if reported:
+        return reported
+
+    if not data.get("language"):
+        # No label at all (the HF route doesn't return one) — script is all we have.
+        return voted
+
+    # A label we don't support (e.g. Greek misread as Bulgarian) and no Greek
+    # script: abstain rather than guess, so this chunk doesn't skew the vote.
+    return None
+
+
+def _probe_language(audio_path):
+    """Transcribe one chunk with auto-detect on and report what language it looks like."""
+    if _openai_client:
+        data = _transcribe_via_openai(audio_path)
+    else:
+        data = _transcribe_via_http(audio_path)
+    return _language_from_probe(data)
+
+
+def _sample_for_probing(chunks, probe_count):
+    """Pick up to probe_count non-silent chunks spread evenly across the audio."""
+    candidates = [chunk for chunk in chunks if not _is_silent_wav(str(chunk))]
+    if not candidates or probe_count < 1:
+        return []
+    if len(candidates) <= probe_count:
+        return candidates
+    if probe_count == 1:
+        return [candidates[0]]
+
+    step = (len(candidates) - 1) / (probe_count - 1)
+    return [candidates[round(index * step)] for index in range(probe_count)]
+
+
+def detect_language(chunks, probe_count=LANGUAGE_PROBE_COUNT):
+    """Detect the audio's language from sampled chunks.
+
+    Returns 'el', 'en', or None when the probes disagree or fail — None leaves
+    Whisper on per-chunk auto-detect, i.e. the previous behaviour.
+    """
+    override = _normalize_language_code(os.getenv("WHISPER_LANGUAGE"))
+    if override:
+        print(f"[Whisper] language pinned to '{override}' via WHISPER_LANGUAGE")
+        return override
+
+    probes = _sample_for_probing(chunks, probe_count)
+    if not probes:
+        return None
+
+    votes = []
+    with ThreadPoolExecutor(max_workers=len(probes)) as executor:
+        futures = [executor.submit(_probe_language, str(chunk)) for chunk in probes]
+        for future in as_completed(futures):
+            try:
+                vote = future.result()
+            except Exception as e:
+                print(f"[Whisper] language probe failed: {type(e).__name__}: {e}")
+                continue
+            if vote in SUPPORTED_LANGUAGES:
+                votes.append(vote)
+
+    if not votes:
+        print("[Whisper] language detection inconclusive; leaving auto-detect on")
+        return None
+
+    winner = max(SUPPORTED_LANGUAGES, key=votes.count)
+    print(f"[Whisper] detected language '{winner}' from {len(probes)} probes (votes: {votes})")
+    return winner
 
 
 def _is_silent_wav(audio_path: str, silence_threshold: float = 0.001) -> bool:
@@ -262,30 +436,76 @@ def _refine_segments(segments, audio_path, fallback_text, max_segment_seconds=MA
     return _estimate_segments_from_text(fallback_text, 0.0, duration, max_segment_seconds=max_segment_seconds)
 
 
-def _transcribe_via_openai(audio_path: str) -> dict:
-    """Transcribe via OpenAI Whisper API — truly parallel, ~2s/chunk."""
+def _transcribe_via_openai(audio_path: str, language: str | None = None) -> dict:
+    """Transcribe via the configured OpenAI speech-to-text model.
+
+    Passing language=None leaves auto-detect on, which is what the language
+    probes need; every real chunk should pass the detected language.
+    """
+    options = {}
+    if language:
+        options["language"] = language
+        prompt = _prompt_for_language(language)
+        if prompt:
+            options["prompt"] = prompt
+
     with open(audio_path, "rb") as f:
-        response = _openai_client.audio.transcriptions.create(
-            model="whisper-1",
-            file=f,
-            response_format="verbose_json",
-            timestamp_granularities=["segment"],
-            timeout=60,  # fail fast instead of hanging on a stalled connection
-        )
+        request = {
+            "model": _OPENAI_TRANSCRIPTION_MODEL,
+            "file": f,
+            "timeout": 60,  # fail fast instead of hanging on a stalled connection
+            **options,
+        }
+        if _OPENAI_TRANSCRIPTION_MODEL == "whisper-1":
+            request["response_format"] = "verbose_json"
+            request["timestamp_granularities"] = ["segment"]
+        response = _openai_client.audio.transcriptions.create(**request)
     return response.model_dump()
 
 
-def _transcribe_via_http(audio_path: str) -> dict:
+def _transcribe_via_http(audio_path: str, language: str | None = None) -> dict:
     """POST audio directly to the configured ASR endpoint; no InferenceClient routing."""
     with open(audio_path, "rb") as f:
         audio_bytes = f.read()
+
+    headers = {
+        "Authorization": f"Bearer {_asr_token}",
+        "x-wait-for-model": "true",  # hold connection until model is warm instead of 503
+    }
+
+    # HF's ASR route only accepts generation options in the JSON body form, so
+    # pinning a language means sending base64 instead of raw bytes. This route
+    # is the fallback (OpenAI wins whenever OPENAI_API_KEY is set) and is not
+    # exercised here, so fall back to the raw-bytes form if it's rejected
+    # rather than failing the chunk over a language hint.
+    if language:
+        try:
+            resp = _requests.post(
+                _asr_url,
+                headers={**headers, "Content-Type": "application/json"},
+                json={
+                    "inputs": base64.b64encode(audio_bytes).decode("ascii"),
+                    "parameters": {
+                        "generate_kwargs": {"language": language, "task": "transcribe"}
+                    },
+                },
+                timeout=300,
+            )
+            if resp.ok:
+                return resp.json()
+            print(
+                f"[ASR] language-pinned request rejected ({resp.status_code}); "
+                "retrying with auto-detect"
+            )
+        except Exception as e:
+            print(
+                f"[ASR] language-pinned request failed ({type(e).__name__}: {e}); "
+                "retrying with auto-detect"
+            )
+
     resp = _requests.post(
         _asr_url,
-        headers={
-            "Authorization": f"Bearer {_asr_token}",
-            "Content-Type": "audio/wav",
-            "x-wait-for-model": "true",  # hold connection until model is warm instead of 503
-        },
+        headers={**headers, "Content-Type": "audio/wav"},
         data=audio_bytes,
         timeout=300,
     )
@@ -295,7 +515,7 @@ def _transcribe_via_http(audio_path: str) -> dict:
     return resp.json()
 
 
-def transcribe_audio(audio_path: str):
+def transcribe_audio(audio_path: str, language: str | None = None):
     if _is_silent_wav(audio_path):
         print(f"transcribe_audio: skipping silent chunk {audio_path}")
         return {"text": "", "segments": [], "timestamps": []}
@@ -305,7 +525,11 @@ def transcribe_audio(audio_path: str):
 
     for attempt in range(1, ASR_MAX_RETRIES + 1):
         try:
-            data = _transcribe_via_openai(audio_path) if _openai_client else _transcribe_via_http(audio_path)
+            data = (
+                _transcribe_via_openai(audio_path, language=language)
+                if _openai_client
+                else _transcribe_via_http(audio_path, language=language)
+            )
             last_exc = None
             break
         except Exception as e:
@@ -331,16 +555,78 @@ def transcribe_audio(audio_path: str):
         traceback.print_exc()
         raise
 
+    prompt = _prompt_for_language(language)
+    kept = _drop_prompt_echoes(refined, prompt, audio_path)
+
+    # Rebuild the flat text from the surviving segments when anything was
+    # dropped, so the echo can't leak back in through data["text"].
+    text = (
+        " ".join(s["text"] for s in kept if s.get("text")).strip()
+        if len(kept) != len(refined)
+        else (data.get("text") or "").strip()
+    )
+
     return {
-        "text": (data.get("text") or "").strip(),
-        "segments": refined,
-        "timestamps": refined,
+        "text": text,
+        "segments": kept,
+        "timestamps": kept,
     }
 
-MAX_WORKERS = 16  # OpenAI allows high concurrency; HF router: 8 is sufficient
+def _merge_chunk_segments(chunks, results):
+    """Offset, clamp, and remove duplicate segments produced at chunk edges."""
+    merged = []
+
+    for index in sorted(results):
+        result = results[index]
+        offset = index * CHUNK_SECONDS
+        chunk_duration = _wav_duration_seconds(str(chunks[index])) or CHUNK_SECONDS
+        chunk_end = offset + chunk_duration
+
+        for segment in result.get("segments", []):
+            start = segment.get("start")
+            end = segment.get("end")
+            text = (segment.get("text") or "").strip()
+            if not text or not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                continue
+
+            start = max(0.0, min(float(start), chunk_duration)) + offset
+            end = max(start - offset, min(float(end), chunk_duration)) + offset
+            if end <= start:
+                continue
+
+            current = {
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "text": text,
+            }
+
+            if merged:
+                previous = merged[-1]
+                previous_text = " ".join(previous["text"].casefold().split())
+                current_text = " ".join(text.casefold().split())
+                overlaps = current["start"] <= previous["end"] + 0.5
+                duplicate = current_text == previous_text or current_text in previous_text or previous_text in current_text
+                if overlaps and duplicate:
+                    if len(current_text) > len(previous_text):
+                        previous["text"] = text
+                    previous["start"] = min(previous["start"], current["start"])
+                    previous["end"] = max(previous["end"], current["end"])
+                    continue
+
+            merged.append(current)
+
+    return merged
 
 
-def transcribe_audio_chunks(audio_path):
+MAX_WORKERS = 4  # Keep concurrent requests low enough for the shared HF route.
+
+
+def transcribe_audio_chunks(audio_path, language=None):
+    """Transcribe a WAV in parallel chunks.
+
+    language: 'el', 'en', or None to detect it from the audio. Whatever is used
+    is pinned across every chunk so the language can't drift mid-transcript.
+    """
     audio_path = Path(audio_path)
     # Give each video its own chunk subfolder (named after the audio file's
     # stem) instead of a single shared "temp_chunks" folder. With one shared
@@ -352,7 +638,8 @@ def transcribe_audio_chunks(audio_path):
 
     print(f"Created {len(chunks)} chunks")
 
-    full_text = ""
+    language = _normalize_language_code(language) or detect_language(chunks)
+
     all_segments = []
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -361,7 +648,7 @@ def transcribe_audio_chunks(audio_path):
 
         for index, chunk in enumerate(chunks):
             futures[
-                executor.submit(transcribe_audio, str(chunk))
+                executor.submit(transcribe_audio, str(chunk), language)
             ] = index
 
         results = {}
@@ -387,7 +674,7 @@ def transcribe_audio_chunks(audio_path):
         print(f"Retrying {len(failed_indices)} failed chunks...")
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             retry_futures = {
-                executor.submit(transcribe_audio, str(chunks[i])): i
+                executor.submit(transcribe_audio, str(chunks[i]), language): i
                 for i in failed_indices
             }
             for future in as_completed(retry_futures):
@@ -399,20 +686,7 @@ def transcribe_audio_chunks(audio_path):
                     print(f"Chunk {index} failed again: {e}")
 
 
-    for index in sorted(results):
-
-        result = results[index]
-
-        offset = index * CHUNK_SECONDS
-
-        full_text += result["text"] + " "
-
-        for segment in result["segments"]:
-
-            segment["start"] += offset
-            segment["end"] += offset
-
-            all_segments.append(segment)
+    all_segments = _merge_chunk_segments(chunks, results)
 
     print("Successful chunks:", len(results))
     print("Failed chunks:", len(chunks) - len(results))
@@ -431,6 +705,7 @@ def transcribe_audio_chunks(audio_path):
 
     # Sort all segments by start time
     all_segments.sort(key=lambda s: s.get("start", 0))
+    full_text = " ".join(segment["text"] for segment in all_segments)
 
     # Delete temporary chunks AFTER transcription is complete
     for chunk in chunks:
@@ -447,4 +722,5 @@ def transcribe_audio_chunks(audio_path):
         "text": full_text.strip(),
         "segments": all_segments,
         "timestamps": all_segments,
+        "language": language,
     }

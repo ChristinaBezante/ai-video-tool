@@ -310,7 +310,15 @@ def _compact_transcript_for_json(transcript):
             }
         )
 
-    return {"segments": segments}
+    compact = {"segments": segments}
+
+    # Keep the language Whisper was pinned to, so answers don't have to re-derive
+    # it from the transcript's script on every question.
+    language = data.get("language")
+    if language:
+        compact["language"] = language
+
+    return compact
 
 
 def _update_shared_json(path: Path, data):

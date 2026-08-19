@@ -15,6 +15,14 @@ function formatTimestamp(seconds) {
   return `${m}:${ss}`;
 }
 
+const INLINE_TIMESTAMP_RE = /^(\d{1,2}):(\d{2})$/;
+
+function parseTimestampToSeconds(text) {
+  const match = INLINE_TIMESTAMP_RE.exec(text.trim());
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
 function ChatMessages({ messages, isLoading, onSeek }) {
   const scrollContentRef = useAutoScroll(isLoading);
   const [expandedTimestamps, setExpandedTimestamps] = useState({});
@@ -26,9 +34,35 @@ function ChatMessages({ messages, isLoading, onSeek }) {
     }));
   };
 
+  // The LLM is instructed to write a bare `mm:ss` inline-code marker right
+  // before any code snippet it generates -- intercept it here and render a
+  // clickable seek badge instead of a plain monospace pill.
+  const markdownComponents = {
+    code({ children, className, ...props }) {
+      const text = String(children);
+      const seconds = parseTimestampToSeconds(text);
+      if (seconds != null) {
+        return (
+          <button
+            type="button"
+            className="chat-message-timestamp-badge chat-message-inline-timestamp"
+            onClick={() => onSeek && onSeek(seconds)}
+          >
+            ⏱ {text.trim()}
+          </button>
+        );
+      }
+      return (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    },
+  };
+
   return (
     <div ref={scrollContentRef} className="chat-messages">
-      {messages.map(({ role, content, loading, error, timestamps }, idx) => {
+      {messages.map(({ role, content, loading, error, timestamps, streaming }, idx) => {
         if (loading && !content) {
           return (
             <div key={idx} className="chat-message chat-message-thinking">
@@ -54,8 +88,8 @@ function ChatMessages({ messages, isLoading, onSeek }) {
 
             <div className="chat-message-content">
               <div className="markdown-container">
-                {role === 'assistant' ? (
-                  <Markdown>{content}</Markdown>
+                {role === 'assistant' && !streaming ? (
+                  <Markdown components={markdownComponents}>{content}</Markdown>
                 ) : (
                   <div className="chat-message-text">{content}</div>
                 )}

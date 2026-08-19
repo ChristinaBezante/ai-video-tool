@@ -626,11 +626,14 @@ def _merge_chunk_segments(chunks, results):
 MAX_WORKERS = 16 if _openai_client else 4
 
 
-def transcribe_audio_chunks(audio_path, language=None):
+def transcribe_audio_chunks(audio_path, language=None, on_progress=None):
     """Transcribe a WAV in parallel chunks.
 
     language: 'el', 'en', or None to detect it from the audio. Whatever is used
     is pinned across every chunk so the language can't drift mid-transcript.
+    on_progress: optional callback(completed_count, total_chunks), invoked
+    after every chunk finishes (success or failure) so callers can surface
+    granular progress instead of only finding out once everything is done.
     """
     audio_path = Path(audio_path)
     # Give each video its own chunk subfolder (named after the audio file's
@@ -675,6 +678,12 @@ def transcribe_audio_chunks(audio_path, language=None):
             except Exception as e:
                 print(f"Chunk {index} failed: {type(e).__name__}: {e}")
 
+            if on_progress:
+                try:
+                    on_progress(len(results), len(chunks))
+                except Exception as e:
+                    print(f"[Whisper] on_progress callback failed: {e}")
+
     # --- retry any chunks that failed on the first pass ---
     failed_indices = [i for i in range(len(chunks)) if i not in results]
     if failed_indices:
@@ -691,6 +700,12 @@ def transcribe_audio_chunks(audio_path, language=None):
                     print(f"Chunk {index} succeeded on retry")
                 except Exception as e:
                     print(f"Chunk {index} failed again: {e}")
+
+                if on_progress:
+                    try:
+                        on_progress(len(results), len(chunks))
+                    except Exception as e:
+                        print(f"[Whisper] on_progress callback failed: {e}")
 
 
     all_segments = _merge_chunk_segments(chunks, results)

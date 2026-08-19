@@ -83,26 +83,36 @@ function Chatbot({ onSeek, videoId }) {
           content: "",
           timestamps: data.timestamps ?? [],
           loading: false,
+          streaming: !!fullAnswer,
         };
       });
 
       if (fullAnswer) {
-        const speed = Math.max(12, Math.min(40, 1200 / Math.max(fullAnswer.length, 1)));
+        // Reveal in small chunks instead of one char per tick -- markdown
+        // re-parses the whole message on every update (see `streaming` in
+        // ChatMessages), and one-char-per-tick was firing 100+ re-renders/sec
+        // for long answers, hogging the main thread enough to make the video
+        // seek bar feel unresponsive/inaccurate if dragged while it streamed.
+        const totalSteps = Math.min(fullAnswer.length, 60);
+        const stepSize = Math.max(1, Math.ceil(fullAnswer.length / totalSteps));
+        const speed = Math.max(20, Math.min(40, 1200 / totalSteps));
         let index = 0;
 
         const intervalId = window.setInterval(() => {
-          index += 1;
+          index += stepSize;
+          const done = index >= fullAnswer.length;
 
           setMessages((draft) => {
             if (draft[draft.length - 1]?.role === "assistant") {
               draft[draft.length - 1] = {
                 ...draft[draft.length - 1],
-                content: fullAnswer.slice(0, index),
+                content: fullAnswer.slice(0, Math.min(index, fullAnswer.length)),
+                streaming: !done,
               };
             }
           });
 
-          if (index >= fullAnswer.length) {
+          if (done) {
             window.clearInterval(intervalId);
           }
         }, speed);

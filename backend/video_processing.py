@@ -144,11 +144,28 @@ def normalize_video(video_path, normalized_dir, force=False):
         and audio_codec == "aac"
     )
 
-    if already_ok:
-        print("Video already in canonical format.")
-        return video_path
-
     output_path = normalized_dir / f"{video_path.stem}_normalized.mp4"
+
+    if already_ok:
+        # Codecs are already browser-friendly, but the moov atom (the index
+        # the browser needs to map a seek time to a byte offset) can still
+        # sit at the end of the file -- common for phone/screen recordings.
+        # That makes the HTML5 seek bar land on the wrong timestamp when
+        # dragged. Remux with a stream copy (no re-encode, fast) to move it
+        # to the front.
+        try:
+            (
+                ffmpeg
+                .input(str(video_path))
+                .output(str(output_path), c="copy", movflags="+faststart")
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+            print("Video already in canonical format; remuxed for faststart seeking.")
+            return output_path
+        except ffmpeg.Error as e:
+            print(f"Faststart remux failed, serving original file as-is: {e}")
+            return video_path
 
     attempts = [
         {},

@@ -1,7 +1,9 @@
 from fastapi import FastAPI, UploadFile, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
+import re
 import shutil
+import time
 from concurrent.futures import ThreadPoolExecutor
 from fastapi.staticfiles import StaticFiles
 from video_processing import extract_audio
@@ -68,6 +70,32 @@ def _summary_query_for_language(language: str) -> str:
 
 def _clip_query_for_summary() -> str:
     return "video summary"
+
+
+_INLINE_TIMESTAMP_RE = re.compile(r"`(\d{1,2}):(\d{2})`")
+
+
+def _snap_inline_timestamps(answer: str, segments) -> str:
+    """Replace every inline `mm:ss` marker (the LLM writes one above each code
+    snippet, see llama.py's system prompt) with the nearest REAL transcript
+    segment start time from `segments` -- the LLM only paraphrases the
+    "[mm:ss-mm:ss]" tags it was given and can drift to a plausible-looking
+    time that isn't an actual moment in the video.
+    """
+    starts = sorted(
+        start for start in (seg.payload.get("start") for seg in segments)
+        if isinstance(start, (int, float))
+    )
+    if not starts:
+        return answer
+
+    def _replace(match):
+        requested = int(match.group(1)) * 60 + int(match.group(2))
+        nearest = min(starts, key=lambda s: abs(s - requested))
+        minutes, secs = divmod(int(nearest), 60)
+        return f"`{minutes}:{secs:02d}`"
+
+    return _INLINE_TIMESTAMP_RE.sub(_replace, answer)
 
 
 def _initialize_current_video_id() -> str | None:
@@ -379,18 +407,23 @@ def _set_job_status(job_id, status=None, stage=None, progress=None, error=None, 
     JOBS[job_id] = job
 
 
-def _run_audio_pipeline(video_path: Path, output_audio: Path):
+def _run_audio_pipeline(video_path: Path, output_audio: Path, job_id=None):
     """Extract audio, transcribe it, and create/store text embeddings.
 
-    Runs with detailed progress tracking.
+    Runs with detailed progress tracking. When job_id is given, pushes
+    granular stage/progress updates as each step advances -- without this,
+    the frontend's progress bar sat frozen at "extracting_audio" for the
+    entire (often multi-minute) transcription pass, since that was the only
+    status update between the start and the final "finalizing" jump.
     """
     transcript_error = None
     transcript_for_json = {"segments": []}
     embeddings = []
 
     try:
+        t_audio = time.perf_counter()
         extract_audio(video_path, output_audio)
-        print(f"✓ Audio extraction complete for {video_path.stem}")
+        print(f"✓ Audio extraction complete for {video_path.stem}  [{time.perf_counter()-t_audio:.1f}s]")
     except RuntimeError as e:
         print(f"✗ Direct audio extraction failed for {video_path.stem}: {e}")
         try:
@@ -407,15 +440,33 @@ def _run_audio_pipeline(video_path: Path, output_audio: Path):
             import time as _time
             t0 = _time.perf_counter()
             print(f"✓ Starting transcription for {video_path.stem}...")
-            transcript = transcribe_audio_chunks(str(output_audio))
+
+            if job_id:
+                _set_job_status(job_id, stage="transcribing_audio", progress=30)
+
+            def _on_transcribe_progress(completed, total):
+                if job_id and total:
+                    _set_job_status(
+                        job_id,
+                        stage="transcribing_audio",
+                        progress=30 + int(45 * completed / total),
+                    )
+
+            transcript = transcribe_audio_chunks(str(output_audio), on_progress=_on_transcribe_progress)
             transcript_for_json = _compact_transcript_for_json(transcript)
             print(f"✓ Transcription complete: {len(transcript_for_json.get('segments', []))} segments  [{_time.perf_counter()-t0:.1f}s]")
+
+            if job_id:
+                _set_job_status(job_id, stage="embedding_text", progress=80)
 
             t1 = _time.perf_counter()
             print(f"↻ Creating text embeddings...")
             embeddings = create_embeddings_from_transcript(transcript_for_json)
             store_text_embeddings(video_path.stem, embeddings)
             print(f"✓ Embeddings stored: {len(embeddings)} vectors  [{_time.perf_counter()-t1:.1f}s]")
+
+            if job_id:
+                _set_job_status(job_id, stage="embedding_text", progress=90)
     except Exception as e:
         transcript_error = str(e)
         print(f"✗ Transcription/embedding failed for {video_path.stem}: {e}")
@@ -467,7 +518,10 @@ def _process_upload_job(
     scene_threshold,
     keyframes_only,
     frame_max_width,
+    start_time=None,
 ):
+    if start_time is None:
+        start_time = time.perf_counter()
     try:
         video_path = Path(video_path)
         global CURRENT_VIDEO_ID
@@ -480,17 +534,40 @@ def _process_upload_job(
         _clear_previous_video_files(video_path.stem)
         _clear_previous_uploads(video_path.name)
 
+        # Ensure the file the frontend actually plays is seek-friendly
+        # (faststart MP4 / H.264 / AAC). Otherwise the browser's seek bar
+        # can land on the wrong timestamp when dragged, since the moov atom
+        # (the index mapping time -> byte offset) may sit at the end of the
+        # raw upload.
+        t_normalize = time.perf_counter()
+        try:
+            playable_video = Path(normalize_video(video_path, NORMALIZED_DIR))
+            print(f"✓ Faststart prep done  [{time.perf_counter()-t_normalize:.1f}s]")
+            if playable_video != video_path:
+                served_filename = f"{video_path.stem}.mp4"
+                served_path = UPLOAD_DIR / served_filename
+                shutil.copyfile(playable_video, served_path)
+                if video_path.suffix.lower() != ".mp4":
+                    video_path.unlink(missing_ok=True)
+                filename = served_filename
+                video_path = served_path
+        except Exception as prep_error:
+            print(f"⚠ Could not prepare video for playback  [{time.perf_counter()-t_normalize:.1f}s], serving original file: {prep_error}")
+
         output_audio = AUDIO_DIR / f"{video_path.stem}.wav"
 
         # Only extract and process audio (no frame extraction for speed)
         _set_job_status(job_id, status="processing", stage="extracting_audio", progress=25)
 
-        transcript_for_json, embeddings, transcript_error = _run_audio_pipeline(video_path, output_audio)
+        transcript_for_json, embeddings, transcript_error = _run_audio_pipeline(video_path, output_audio, job_id=job_id)
 
         _set_job_status(job_id, status="processing", stage="finalizing", progress=95)
 
         _update_shared_json(TRANSCRIPTS_PATH, transcript_for_json)
         _update_shared_json(EMBEDDINGS_PATH, embeddings)
+
+        total_time_sec = time.perf_counter() - start_time
+        print(f"⏱ Full upload-to-embeddings pipeline for {video_path.stem} took {total_time_sec:.1f}s")
 
         result = {
             "filename": filename,
@@ -502,9 +579,12 @@ def _process_upload_job(
             "transcript": transcript_for_json,
             "transcript_error": transcript_error,
             "frame_count": 0,
+            "total_time_sec": round(total_time_sec, 1),
         }
         _set_job_status(job_id, status="completed", stage="completed", progress=100, result=result)
     except Exception as e:
+        total_time_sec = time.perf_counter() - start_time
+        print(f"⏱ Upload pipeline failed after {total_time_sec:.1f}s: {e}")
         _set_job_status(job_id, status="failed", stage="failed", progress=100, error=str(e))
 
 
@@ -524,6 +604,8 @@ async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTask
     import re as _re
     import subprocess
     import sys
+
+    start_time = time.perf_counter()
 
     url = (req.url or "").strip()
     if not url:
@@ -632,6 +714,7 @@ async def download_youtube(req: YoutubeRequest, background_tasks: BackgroundTask
                 req.scene_threshold,
                 req.keyframes_only,
                 req.frame_max_width,
+                start_time,
             )
         except subprocess.TimeoutExpired:
             _set_job_status(job_id, status="failed", stage="failed", progress=100,
@@ -675,6 +758,8 @@ async def create_upload_file(
     frame_max_width limits frame width to reduce CPU/disk cost.
     """
 
+    start_time = time.perf_counter()
+
     if not file_upload.filename:
         raise HTTPException(status_code=400, detail="Missing uploaded filename")
 
@@ -709,6 +794,7 @@ async def create_upload_file(
         scene_threshold,
         keyframes_only,
         frame_max_width,
+        start_time,
     )
 
     return {
@@ -811,6 +897,14 @@ async def ask(req: Question):
         except Exception as e:
             print(f"LLM error: {e}")
             raise HTTPException(status_code=502, detail=f"LLM provider error: {e}")
+
+        # The LLM writes an inline `mm:ss` marker (in backticks) above any code
+        # snippet, but it's just paraphrasing the excerpt tags in `context` --
+        # it can drift to a nearby-sounding time that isn't an actual segment.
+        # Snap every such marker to the closest REAL segment start from the
+        # same excerpts the answer was grounded in, so the jump link it
+        # produces always lands on an actual transcript moment.
+        answer = _snap_inline_timestamps(answer, sorted_results)
 
         print(answer)
 

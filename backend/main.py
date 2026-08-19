@@ -892,7 +892,7 @@ async def ask(req: Question):
             by_score = [r for r in by_score if getattr(r, "score", 0) >= top_score * RELATIVE_SCORE_BAND]
             top_matches = sorted(by_score[:max_response_timestamps], key=lambda r: r.payload.get("start") or 0)
 
-        answer_timestamps = sorted(
+        answer_timestamps = [] if summary_mode else sorted(
             [
                 {"start": r.payload.get("start"), "end": r.payload.get("end")}
                 for r in top_matches
@@ -900,7 +900,6 @@ async def ask(req: Question):
             ],
             key=lambda t: t["start"],
         )
-
         return {
             "answer": answer,
             "timestamps": answer_timestamps,

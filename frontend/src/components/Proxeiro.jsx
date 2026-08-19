@@ -6,7 +6,6 @@ import {
     MessageCircle,
     ChevronRight,
     LoaderCircle,
-    CheckCircle2,
     RefreshCw,
     Play,
     Pause,
@@ -492,10 +491,21 @@ const Proxeiro = () => {
                     ) : (
                         <div className="upload-loaded-stage">
                             <div className="upload-loaded-header">
-                                <p className="upload-status"><CheckCircle2 size={16} /> Video ready</p>
                                 <button className="upload-secondary-action" type="button" onClick={handleReplaceClick}>
                                     <RefreshCw size={14} />
                                     Replace file
+                                </button>
+                                <button
+                                    className="upload-secondary-action"
+                                    type="button"
+                                    onClick={() => {
+                                        setShowYoutubeInput((prev) => !prev);
+                                        setYoutubeUrl('');
+                                    }}
+                                    disabled={isUploading}
+                                >
+                                    <YtIcon />
+                                    Import from YouTube
                                 </button>
                                 <input
                                     ref={replaceInputRef}
@@ -505,6 +515,37 @@ const Proxeiro = () => {
                                     onChange={handleChange}
                                 />
                             </div>
+
+                            {showYoutubeInput && (
+                                <div className="yt-inline-form">
+                                    <span className="yt-inline-icon"><YtIcon /></span>
+                                    <input
+                                        className="yt-inline-input"
+                                        type="url"
+                                        placeholder="Paste a YouTube URL…"
+                                        value={youtubeUrl}
+                                        onChange={(e) => setYoutubeUrl(e.target.value)}
+                                        autoFocus
+                                        onKeyDown={(e) => e.key === 'Enter' && submitYoutubeUrl(e)}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="yt-inline-submit"
+                                        onClick={submitYoutubeUrl}
+                                        disabled={!youtubeUrl.trim() || isUploading}
+                                    >
+                                        {isUploading ? <LoaderCircle className="spin" size={15} /> : <ChevronRight size={15} />}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="yt-inline-close"
+                                        onClick={() => { setShowYoutubeInput(false); setYoutubeUrl(''); }}
+                                    >
+                                        <X size={15} />
+                                    </button>
+                                </div>
+                            )}
+
                             <h2 className="upload-video-title">{file?.name ?? 'Uploaded video'}</h2>
 
                             <div className={`video-stage${isPlaying ? ' video-stage-playing' : ''}`} onClick={togglePlay}>

@@ -618,7 +618,12 @@ def _merge_chunk_segments(chunks, results):
     return merged
 
 
-MAX_WORKERS = 4  # Keep concurrent requests low enough for the shared HF route.
+# The shared/serverless HF route needs a low cap to avoid getting throttled,
+# but OpenAI's transcription API has much higher per-account concurrency
+# limits and each request is truly independent, so it's safe to fan out far
+# more chunks at once there -- this is what actually lets a 6-minute video
+# (~12 chunks) transcribe in a handful of seconds instead of several rounds.
+MAX_WORKERS = 16 if _openai_client else 4
 
 
 def transcribe_audio_chunks(audio_path, language=None):
@@ -642,7 +647,9 @@ def transcribe_audio_chunks(audio_path, language=None):
 
     all_segments = []
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    max_workers = min(MAX_WORKERS, len(chunks)) or 1
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
 
         futures = {}
 
@@ -672,7 +679,7 @@ def transcribe_audio_chunks(audio_path, language=None):
     failed_indices = [i for i in range(len(chunks)) if i not in results]
     if failed_indices:
         print(f"Retrying {len(failed_indices)} failed chunks...")
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(failed_indices))) as executor:
             retry_futures = {
                 executor.submit(transcribe_audio, str(chunks[i]), language): i
                 for i in failed_indices

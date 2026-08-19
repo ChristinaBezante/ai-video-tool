@@ -21,6 +21,15 @@ def _get_model():
     return _model
 
 
+def warm_up():
+    """Force the lazy model load now instead of on the first real embed call.
+
+    Call this from a background thread at server startup so the ~5-15s load
+    cost lands before a user's first upload, not inside it.
+    """
+    _get_model()
+
+
 def create_embeddings(transcript_json_path: str):
     with open(transcript_json_path, "r", encoding="utf-8") as f:
         transcript = json.load(f)

@@ -40,6 +40,7 @@ const Proxeiro = () => {
     const [youtubeUrl, setYoutubeUrl] = useState('');
     const [isPlaying, setIsPlaying] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
+    const [volume, setVolume] = useState(1);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
 
@@ -298,7 +299,10 @@ const Proxeiro = () => {
 
         player.on('play', () => setIsPlaying(true));
         player.on('pause', () => setIsPlaying(false));
-        player.on('volumechange', () => setIsMuted(player.muted() || player.volume() === 0));
+        player.on('volumechange', () => {
+            setIsMuted(player.muted() || player.volume() === 0);
+            setVolume(player.volume());
+        });
         player.on('loadedmetadata', () => setDuration(player.duration() || 0));
         player.on('durationchange', () => setDuration(player.duration() || 0));
         player.on('timeupdate', () => {
@@ -326,6 +330,15 @@ const Proxeiro = () => {
         const player = playerRef.current;
         if (!player) return;
         player.muted(!player.muted());
+    };
+
+    const handleVolumeChange = (event) => {
+        const player = playerRef.current;
+        if (!player) return;
+        const nextVolume = Number(event.target.value);
+        setVolume(nextVolume);
+        player.volume(nextVolume);
+        player.muted(nextVolume === 0);
     };
 
     const toggleFullscreen = () => {
@@ -590,6 +603,16 @@ const Proxeiro = () => {
                                             <button type="button" onClick={toggleMute} aria-label={isMuted ? 'Unmute' : 'Mute'}>
                                                 {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
                                             </button>
+                                            <input
+                                                type="range"
+                                                className="video-volume-slider"
+                                                min="0"
+                                                max="1"
+                                                step="0.01"
+                                                value={isMuted ? 0 : volume}
+                                                onChange={handleVolumeChange}
+                                                aria-label="Volume"
+                                            />
                                             <span className="video-time">{formatTime(currentTime)} / {formatTime(duration)}</span>
                                         </div>
                                         <button type="button" onClick={toggleFullscreen} aria-label="Fullscreen">

@@ -106,7 +106,15 @@ def embed_text_clip(text: str) -> list[float]:
     import torch  # noqa: PLC0415
 
     model, processor = _get_model()
-    inputs = processor(text=[text], return_tensors="pt", padding=True)
+    # CLIP's text tower has a fixed 77-token context window; longer queries
+    # raise ValueError in model.text_model without truncation.
+    inputs = processor(
+        text=[text],
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=77,
+    )
     with torch.no_grad():
         # Call text sub-model and projection explicitly to avoid version
         # differences in get_text_features() return type.

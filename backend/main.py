@@ -72,6 +72,39 @@ def _clip_query_for_summary() -> str:
     return "video summary"
 
 
+def _expand_with_neighbors(candidates, all_segments, window=1):
+    """Pull in each matched segment's immediate chronological neighbors.
+
+    Semantic search scores each transcript segment independently, but a
+    coherent explanation (e.g. walking through an automaton's states, or a
+    data structure's operations) is often spread across several consecutive
+    segments where only one or two individually score high enough to be
+    retrieved. Without their neighbors, the LLM only sees isolated sentences
+    and has to guess at the missing states/transitions -- expanding the
+    context to include what comes immediately before/after each match keeps
+    the example grounded in what the video actually says.
+    """
+    if not all_segments:
+        return candidates
+
+    id_to_index = {seg.id: i for i, seg in enumerate(all_segments)}
+    selected_indices = set()
+
+    for cand in candidates:
+        idx = id_to_index.get(cand.id)
+        if idx is None:
+            continue
+        for offset in range(-window, window + 1):
+            neighbor_idx = idx + offset
+            if 0 <= neighbor_idx < len(all_segments):
+                selected_indices.add(neighbor_idx)
+
+    if not selected_indices:
+        return candidates
+
+    return [all_segments[i] for i in sorted(selected_indices)]
+
+
 _INLINE_TIMESTAMP_RE = re.compile(r"`(\d{1,2}):(\d{2})`")
 
 
@@ -865,7 +898,14 @@ async def ask(req: Question):
             context_candidates = [
                 r for r in text_results if r.score >= CONTEXT_MIN_SCORE
             ] or text_results[:4]
-            sorted_results = sorted(context_candidates, key=lambda r: r.payload.get("start") or 0)
+
+            # Include each match's immediate chronological neighbors so the
+            # LLM sees full, continuous explanations (e.g. an automaton's
+            # states, a data structure's operations) instead of isolated
+            # sentences that happened to score highest individually.
+            all_video_segments = scroll_all_text(video_id=current_video_id)
+            expanded_candidates = _expand_with_neighbors(context_candidates, all_video_segments, window=1)
+            sorted_results = sorted(expanded_candidates, key=lambda r: r.payload.get("start") or 0)
 
         def _format_ts(seconds):
             if seconds is None:

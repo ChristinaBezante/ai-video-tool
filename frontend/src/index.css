@@ -118,7 +118,7 @@ p {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent-purple), var(--accent-pink));
+  background: linear-gradient(90deg, var(--accent-purple) 0%, #b545f0 25%, #e940f0 50%, #f03080 75%, var(--accent-pink) 100%);
   color: var(--text-strong);
   box-shadow: 0 14px 40px rgba(123, 58, 234, 0.18);
 }

@@ -405,11 +405,13 @@ const Proxeiro = () => {
 
     return(
         <section className="upload-shell">
-            <div className="upload-hero">
-                {/*<p className="upload-eyebrow">Video Research Workspace</p>*/}
-                <h1>Ask questions <span className="feature-heading-accent">about your videos</span></h1>
-                <p className="upload-subtitle">Upload a clip, extract the audio pipeline, and move straight into the AI-assisted review flow.</p>
-            </div>
+            {!uploadedFileURL && (
+                <div className="upload-hero">
+                    {/*<p className="upload-eyebrow">Video Research Workspace</p>*/}
+                    <h1>Ask questions <span className="feature-heading-accent">about your videos</span></h1>
+                    <p className="upload-subtitle">Upload a clip, extract the audio pipeline, and move straight into the AI-assisted review flow.</p>
+                </div>
+            )}
 
             <div className={`upload-grid${uploadedFileURL ? ' upload-grid-loaded' : ''}`}>
                 <div className="upload-center-card">

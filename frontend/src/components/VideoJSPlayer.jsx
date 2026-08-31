@@ -10,6 +10,17 @@ export const VideoJSPlayer = (props) => {
   const playerRef = React.useRef(null);
   const { options, onReady } = props;
 
+  const addLiveIndicator = (player) => {
+    const progressBar = player.el()?.querySelector('.vjs-play-progress');
+    if (!progressBar || progressBar.querySelector('.vjs-live-indicator')) {
+      return;
+    }
+
+    const indicator = document.createElement('span');
+    indicator.className = 'vjs-live-indicator';
+    progressBar.appendChild(indicator);
+  };
+
   React.useEffect(() => {
 
     // Make sure Video.js player is only initialized once
@@ -23,6 +34,7 @@ export const VideoJSPlayer = (props) => {
 
       const player = playerRef.current = videojs(videoElement, options, () => {
         videojs.log('player is ready');
+        addLiveIndicator(player);
         onReady && onReady(player);
       });
 

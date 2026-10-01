@@ -1,54 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
 .main-header {
-  width: 100%;
-  background: rgba(7, 12, 27, 0.83);
-  backdrop-filter: blur(20px);
-  padding: 22px 0;
+  --header-bg: #0A121C;
+  --header-bg-hover: rgba(124, 58, 237, 0.14);
+  --header-line: rgba(255, 255, 255, 0.08);
+  --header-text: #FFFFFF;
+  --header-text-dim: rgba(233, 230, 247, 0.55);
+  --header-accent: linear-gradient(135deg, #7c3aed 0%, #c026d3 50%, #ff3b9a 100%);
+  --header-cta-bg: #ff3b9a;
+  --header-mono: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  /* sticky (not fixed): this app's real scroll container is the nested
+     #root div, not the document. A fixed header is sized against the true
+     browser viewport, which is wider than #root's own scrollbar-gutter'd
+     content box -- so it visually overlapped #root's scrollbar. Sticky
+     keeps the header in #root's normal flow (same width as everything
+     else), and since it's the very first element it's already pinned at
+     the top from scroll position zero, so it still never "follows" the page. */
   position: sticky;
   top: 0;
   z-index: 100;
-  border-bottom: 1px solid rgba(124, 58, 237, 0.1);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.16);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  opacity: 1;
-  visibility: visible;
-}
-
-.header-container {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 0 32px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 24px;
-}
-
-.logo {
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.5px;
-  text-decoration: none;
-  color: #000;
-  font-family: var(--font-display);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color 0.3s ease;
-}
-
-.logo:hover {
-  color: #7c3aed;
+  height: 116px;
+  width: 100%;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--header-line);
+  font-family: var(--header-mono);
+  font-size: 14px;
 }
 
 .logo-link {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 14px;
+  padding: 18px 36px;
   text-decoration: none;
   cursor: pointer;
-  will-change: transform;
-  opacity: 1;
-  visibility: visible;
+  white-space: nowrap;
 }
 
 .logo-icon {
@@ -62,6 +51,7 @@
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   position: relative;
   overflow: hidden;
+  flex: none;
 }
 
 .logo-link:hover .logo-icon {
@@ -94,9 +84,9 @@
 
 .logo-label {
   color: white;
-  font-family: var(--font-display);
+  font-family: var(--font-display, var(--header-mono));
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: 17px;
   letter-spacing: 0.02em;
   background: linear-gradient(135deg, #ffffff, rgba(255, 255, 255, 0.8));
   -webkit-background-clip: text;
@@ -109,115 +99,79 @@
   letter-spacing: 0.04em;
 }
 
-.main-nav {
+.cell {
   display: flex;
   align-items: center;
-  gap: 28px;
-}
-
-.nav-link {
-  color: rgba(255, 255, 255, 0.85);
+  gap: 12px;
+  padding: 18px 30px;
+  border-left: 1px solid var(--header-line);
+  color: var(--header-text-dim);
   text-decoration: none;
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 15px;
-  letter-spacing: 0.02em;
-  padding: 6px 0;
-  position: relative;
-  transition: color 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  background: none;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  font: inherit;
   cursor: pointer;
-  will-change: transform;
+  transition: background 0.15s, color 0.15s;
+}
+
+.cell:hover,
+.cell:focus-visible {
+  background: var(--header-bg-hover);
+  color: var(--header-text);
+  outline: none;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.cta {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.nav-link:hover {
-  color: white;
-}
-
-.nav-underline {
-  position: absolute;
-  left: 0;
-  bottom: -3px;
-  width: 0;
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #7c3aed, #ff3b9a);
-  will-change: width;
-}
-
-/* Premium styling for Get Started link */
-.get-started-link {
-  color: rgba(255, 255, 255, 0.85);
-  padding: 6px 0;
-  position: relative;
-  overflow: visible;
+  align-self: stretch;
+  gap: 10px;
+  padding: 18px 38px;
   background: transparent;
-  border: none;
-  gap: 6px;
-  transition: color 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border-left: 1px solid var(--header-line);
+  color: var(--header-text);
+  font-weight: 400;
+  font-size: 14px;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
 }
 
-.get-started-link::before {
-  display: none;
+.cta:hover {
+  background: var(--header-bg-hover);
+  color: var(--header-text);
 }
 
-.get-started-link:hover {
-  color: white;
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
+.cta:focus-visible {
+  outline: 2px solid var(--header-text);
+  outline-offset: -4px;
 }
 
-.get-started-link:hover::before {
-  display: none;
+.cta svg {
+  transition: transform 0.15s;
 }
 
-.get-started-link .arrow {
-  display: inline-block;
-  transition: all 0.3s ease;
-  font-size: 16px;
-  font-weight: 700;
+.cta:hover svg {
+  transform: translate(2px, -2px);
 }
 
-/* Media queries */
-@media (max-width: 768px) {
-  .header-container {
-    padding: 0 20px;
-    gap: 16px;
-  }
-
-  .main-nav {
-    gap: 16px;
-  }
-
-  .nav-link {
-    font-size: 14px;
-  }
-
-  .get-started-link {
-    padding: 6px 12px;
-    font-size: 14px;
-  }
-
-  .logo-label {
-    font-size: 0.95rem;
-  }
-}
-
-@media (max-width: 900px) {
-  .header-container {
-    padding: 0 24px;
-  }
-
-  .main-nav {
-    gap: 24px;
-  }
+.main-header svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
 }
 
 @media (max-width: 720px) {
-  .main-nav {
+  .nav-link {
+    display: none;
+  }
+
+  .cell-search span {
     display: none;
   }
 }

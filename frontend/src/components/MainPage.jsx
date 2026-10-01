@@ -1,8 +1,15 @@
 import Header from './header.jsx'
 import Footer from './Footer.jsx'
+import ParticlesBackground from './ParticlesBackground.jsx';
 import { useEffect, useRef, useState } from 'react';
-import { Zap, Shield, Users, Star, ArrowUp } from 'lucide-react';
+import { Star } from 'lucide-react';
 import { useLocation, useNavigate } from "react-router-dom";
+
+const demoQueries = [
+  { q: 'what did she say about recursion?', ts: '12:41', a: '"Recursion is just a function trusting itself to finish the job."' },
+  { q: 'where do we set up the venv?', ts: '03:08', a: 'Activate the virtual environment before installing anything.' },
+  { q: 'summarize the last 10 minutes', ts: '48:52', a: 'Wraps up error handling, then a live demo of the CLI.' },
+];
 
 const insightData = {
   speed:    { label: 'How fast?',      text: 'Ask "what happens at minute 34?" and get an answer before you\'d even find the scrubber. No buffering, no waiting — just the moment you need.' },
@@ -86,8 +93,11 @@ function MainPage() {
   const typeRef = useRef(null);
   const cursorRef = useRef(null);
   const stepFillRef = useRef(null);
+  const demoQueryRef = useRef(null);
+  const demoResultRef = useRef(null);
+  const demoTsRef = useRef(null);
+  const demoAnswerRef = useRef(null);
   const [tsReady, setTsReady] = useState(false);
-  const [activeValue, setActiveValue] = useState(0);
   const [activeInsight, setActiveInsight] = useState(null);
   const toggleInsight = (word) => setActiveInsight(prev => prev === word ? null : word);
 
@@ -201,51 +211,65 @@ function MainPage() {
     }
   };
 
-  const coreValues = [
-    {
-      kicker: '01', Icon: Zap, heading: 'Speed first',
-      body: 'Quick analysis and instant access keep the workflow moving.',
-      graphicType: 'speed',
-    },
-    {
-      kicker: '02', Icon: Shield, heading: 'Your content, your control',
-      body: 'Secure processing and private uploads make the product feel trustworthy.',
-      graphicType: 'privacy',
-    },
-    {
-      kicker: '03', Icon: Users, heading: 'Built for teams',
-      body: 'Designed to work equally well for solo creators and larger video teams.',
-      graphicType: 'teams',
-    },
-  ];
+  // Loops through canned searches in the "about" terminal demo: type a
+  // question, reveal the matching timestamp + answer, then erase and repeat.
+  useEffect(() => {
+    let cancelled = false;
+    const timeouts = [];
+    const wait = (ms) => new Promise((resolve) => {
+      timeouts.push(setTimeout(resolve, ms));
+    });
 
-  const renderGraphic = (type) => {
-    if (type === 'speed') return (
-      <div className="cvs-speed-graphic">
-        <div className="cvs-speed-label">Analyzing<span className="cvs-speed-dots">...</span></div>
-        <div className="cvs-bar-track">
-          <div className="cvs-bar-fill" />
-        </div>
-      </div>
-    );
-    if (type === 'privacy') return (
-      <div className="cvs-lock-graphic">
-        <Shield className="cvs-lock-svg" size={26} />
-        <span className="cvs-encrypted-badge">Encrypted &#10003;</span>
-      </div>
-    );
-    if (type === 'teams') return (
-      <div className="cvs-team-graphic">
-        <div className="cvs-team-avatars">
-          {[['CB', '0s'], ['EG', '0.14s'], ['+4', '0.28s']].map(([label, delay]) => (
-            <div key={label} className="cvs-team-avatar" style={{ '--delay': delay }}>{label}</div>
-          ))}
-        </div>
-        <span className="cvs-team-label">2 collaborators online</span>
-      </div>
-    );
-    return null;
-  };
+    const typeInto = async (el, text) => {
+      el.textContent = '';
+      for (let i = 0; i < text.length; i++) {
+        if (cancelled) return;
+        el.textContent = text.slice(0, i + 1);
+        await wait(28);
+      }
+    };
+
+    const eraseFrom = async (el) => {
+      const text = el.textContent;
+      for (let i = text.length; i >= 0; i--) {
+        if (cancelled) return;
+        el.textContent = text.slice(0, i);
+        await wait(12);
+      }
+    };
+
+    const run = async () => {
+      let i = 0;
+      while (!cancelled) {
+        const queryEl = demoQueryRef.current;
+        const resultEl = demoResultRef.current;
+        const tsEl = demoTsRef.current;
+        const answerEl = demoAnswerRef.current;
+        if (!queryEl || !resultEl || !tsEl || !answerEl) return;
+
+        const { q, ts, a } = demoQueries[i % demoQueries.length];
+        await typeInto(queryEl, q);
+        if (cancelled) return;
+        await wait(400);
+        tsEl.textContent = ts;
+        answerEl.textContent = a;
+        resultEl.classList.add('about-demo-result-visible');
+        await wait(2800);
+        if (cancelled) return;
+        resultEl.classList.remove('about-demo-result-visible');
+        await wait(400);
+        await eraseFrom(queryEl);
+        await wait(300);
+        i++;
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+      timeouts.forEach(clearTimeout);
+    };
+  }, []);
 
   const navToUpload = (event) => {
     event.preventDefault()
@@ -260,8 +284,7 @@ function MainPage() {
         onClick={scrollToTop}
         aria-label="Back to top"
       >
-        <ArrowUp size={16} />
-        Back to Top
+        <span className="back-to-top-label">Back to Top</span>
       </button>
       <div className="page-bar-track" aria-hidden="true">
         <div ref={stepFillRef} className="page-bar-fill" />
@@ -321,6 +344,7 @@ function MainPage() {
       </main>
 
       <section id="features" className="main-transition">
+        <ParticlesBackground id="features-particles" />
         <div className="main-transition-inner">
           <div className="feature-head reveal">
             <h2>
@@ -354,81 +378,75 @@ function MainPage() {
       </section>
 
       <section id="about" className="about-section">
+        <ParticlesBackground id="about-particles" />
         <div className="about-section-inner">
-          <div className="about-grid about-grid-compact">
-            <div className="about-copy reveal">
-              <h2>
-                About <span className="feature-heading-accent">Us</span>
-              </h2>
+          <div className="about-head reveal">
+            <h2>
+              About <span className="feature-heading-accent">Us</span>
+            </h2>
+          </div>
+
+          <div className="about-layout">
+            <div className="about-copy reveal reveal-delay-1">
               <p>
-                Re-watching a two-hour lecture just to find one specific explanation can be
-                exhausting. That's why we built Ctrl + Vid.
+                Re-watching a two-hour lecture just to find one explanation is tedious.
+                That's why we built Ctrl + Vid.
               </p>
               <p>
-                Designed specifically with{' '}
+                We're two{' '}
                 <InsightSpan word="students" active={activeInsight === 'students'} onToggle={toggleInsight} />{' '}
-                in mind, it transforms long academic lectures from overwhelming video files into
-                genuinely useful study tools. We've combined{' '}
-                <InsightSpan word="speed" active={activeInsight === 'speed'} onToggle={toggleInsight} />,{' '}
-                clarity, and{' '}
-                <InsightSpan word="privacy" active={activeInsight === 'privacy'} onToggle={toggleInsight} />{' '}
-                into a seamless workflow so you can spend less time blindly scrubbing through{' '}
+                who got tired of dragging a scrubber back and forth. Ctrl + Vid lets you search a
+                lecture like a document: type what you're looking for and jump straight to the{' '}
                 <InsightSpan word="footage" active={activeInsight === 'footage'} onToggle={toggleInsight} />{' '}
-                and more time actually learning.
+                that matches, without giving up{' '}
+                <InsightSpan word="speed" active={activeInsight === 'speed'} onToggle={toggleInsight} />{' '}
+                or{' '}
+                <InsightSpan word="privacy" active={activeInsight === 'privacy'} onToggle={toggleInsight} />.
               </p>
-              <div className="about-feature-list about-feature-list-compact">
-                <span className="about-feature-pill">Searchable clips</span>
-                <span className="about-feature-pill">Auto summaries</span>
-                <span className="about-feature-pill">Team-friendly</span>
+            </div>
+
+            <div className="about-demo reveal reveal-delay-2">
+              <div className="about-demo-topbar">
+                <span className="about-demo-dot about-demo-dot-r" />
+                <span className="about-demo-dot about-demo-dot-y" />
+                <span className="about-demo-dot about-demo-dot-g" />
+                <span className="about-demo-path">search — ctrl+vid</span>
               </div>
-              <div className="about-team-cards">
-                <article className="team-card about-team-card">
-                  <div className="team-avatar">CB</div>
-                  <div>
-                    <h3>Christina - Ioanna Bezante</h3>
-                    <p className="team-role">Co-founder</p>
-                  </div>
-                </article>
-                <article className="team-card about-team-card">
-                  <div className="team-avatar">EG</div>
-                  <div>
-                    <h3>Enterisa Gjozi</h3>
-                    <p className="team-role">Co-founder</p>
-                  </div>
-                </article>
+              <div className="about-demo-body">
+                <div className="about-demo-line">
+                  <span className="about-demo-prompt">&gt;</span>
+                  <span ref={demoQueryRef} className="about-demo-query" />
+                  <span className="type-cursor about-demo-cursor">|</span>
+                </div>
+                <div ref={demoResultRef} className="about-demo-result">
+                  <span className="about-demo-badge">
+                    <span ref={demoTsRef} className="about-demo-ts" />
+                  </span>
+                  <span ref={demoAnswerRef} className="about-demo-answer" />
+                </div>
               </div>
             </div>
-            <div className="about-card about-values-card reveal reveal-delay-2">
-              {/* Shifting glow overlays — opacity driven by activeValue */}
-              <div className="cvs-glow cvs-glow-pink" style={{ opacity: activeValue === 0 ? 0.9 : activeValue === 1 ? 0.4 : 0.08 }} />
-              <div className="cvs-glow cvs-glow-purple" style={{ opacity: activeValue === 2 ? 0.9 : activeValue === 1 ? 0.4 : 0.08 }} />
+          </div>
 
-              <div className="about-values-stack">
-                {coreValues.map(({ kicker, Icon, heading, body, graphicType }, i) => (
-                  <article
-                    key={i}
-                    className={`about-value-row${i === activeValue ? ' cvs-active' : ''}`}
-                    onClick={() => setActiveValue(i)}
-                    onMouseEnter={() => setActiveValue(i)}
-                  >
-                    <span className="about-value-rail" aria-hidden="true">
-                      <span className="about-value-dot" />
-                    </span>
-                    <div className="about-value-content">
-                      <span className="about-value-kicker">{kicker}</span>
-                      <div className="about-value-heading">
-                        <Icon className="about-value-svg" size={18} />
-                        <h3>{heading}</h3>
-                      </div>
-                      <p>{body}</p>
-                      <div className={`cvs-graphic${i === activeValue ? ' cvs-graphic-visible' : ''}`}>
-                        {i === activeValue && (
-                          <div key={activeValue}>{renderGraphic(graphicType)}</div>
-                        )}
-                      </div>
-                    </div>
-                  </article>
-                ))}
+          <div className="about-founders reveal reveal-delay-3">
+            <div className="about-founder-list">
+              <div className="about-founder-card">
+                <span className="about-founder-avatar">CB</span>
+                <span className="about-founder-meta">
+                  <span className="about-founder-name">
+                    Christina - Ioanna Bezante
+                  </span>
+                  <span className="about-founder-role">Co-founder</span>
+                </span>
+              </div>
+              <div className="about-founder-card">
+                <span className="about-founder-avatar">EG</span>
+                <span className="about-founder-meta">
+                  <span className="about-founder-name">
+                    Enterisa Gjozi
+                  </span>
+                  <span className="about-founder-role">Co-founder</span>
+                </span>
               </div>
             </div>
           </div>

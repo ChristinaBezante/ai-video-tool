@@ -52,11 +52,39 @@ export default function useSmoothScroll() {
       frame = window.requestAnimationFrame(step);
     };
 
+    /* The nearest element between the pointer and #root that is itself
+       scrollable in the direction of this gesture.
+     *
+     * Without this the page is eased on every wheel event, so a wheel over the
+     * chat transcript scrolled the whole document instead of the messages. An
+     * opt-in attribute is not enough — anything scrollable has to keep working,
+     * including components added later. At either end of the inner area it
+     * deliberately returns null, so the page takes over again and scroll
+     * chaining behaves normally.
+     */
+    const nestedScroller = (start, deltaY) => {
+      let node = start instanceof Element ? start : null;
+      while (node && node !== el) {
+        const { overflowY } = window.getComputedStyle(node);
+        const scrollable = /^(auto|scroll|overlay)$/.test(overflowY)
+          && node.scrollHeight > node.clientHeight + 1;
+        if (scrollable) {
+          const atTop = node.scrollTop <= 0;
+          const atBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
+          if ((deltaY < 0 && !atTop) || (deltaY > 0 && !atBottom)) return node;
+        }
+        node = node.parentElement;
+      }
+      return null;
+    };
+
     const onWheel = (event) => {
       // Leave pinch-zoom and browser zoom alone.
       if (event.ctrlKey || event.metaKey) return;
-      // Leave any nested scrollable region (a panel, a textarea) to the browser.
+      // Explicit opt-out, for areas that manage their own scrolling.
       if (event.target instanceof Element && event.target.closest('[data-native-scroll]')) return;
+      // Hand the gesture to whatever nested scroller is under the pointer.
+      if (nestedScroller(event.target, event.deltaY)) return;
 
       event.preventDefault();
       if (!animating) {

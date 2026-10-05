@@ -49,12 +49,29 @@ def clear_collections():
     is searchable. The frontend only supports one active video at a time, so
     leftover points from a previous upload would otherwise pollute /ask
     results with segments/frames from a video that's no longer displayed.
+
+    Deletes the points, and deliberately does NOT drop the collections.
+    Dropping is what this used to do, and it silently did nothing: Qdrant's
+    local mode removes the collection from meta.json but leaves its
+    storage.sqlite on disk, so the next ensure_collections() recreates the
+    collection and adopts the orphaned file -- every point comes back. The
+    store had grown to ~39k points while holding one video's worth of data,
+    which slowed every upsert and search and let /ask answer from a video that
+    was no longer loaded.
+
+    The remaining count is logged so a silent failure cannot hide again.
     """
-    if client.collection_exists(TEXT_COLLECTION):
-        client.delete_collection(TEXT_COLLECTION)
-    if client.collection_exists(FRAME_COLLECTION):
-        client.delete_collection(FRAME_COLLECTION)
     ensure_collections()
+
+    for name in (TEXT_COLLECTION, FRAME_COLLECTION):
+        if not client.collection_exists(name):
+            continue
+        client.delete(
+            collection_name=name,
+            points_selector=models.FilterSelector(filter=models.Filter(must=[])),
+        )
+        remaining = client.count(collection_name=name).count
+        print(f"[Qdrant] {name} after clear: {remaining} points")
 
 
 def store_text_embeddings(video_id: str, segments: list[dict]):

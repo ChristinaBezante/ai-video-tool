@@ -18,6 +18,16 @@ def _get_model():
     return _model, _processor
 
 
+def warm_up():
+    """Force the lazy CLIP load now rather than inside the first request.
+
+    Loading it inside a request is expensive out of all proportion to the work:
+    the text model measured 39.3s to load against 0.29s to embed 52 segments,
+    and CLIP is the larger of the two.
+    """
+    _get_model()
+
+
 def _format_timestamp(seconds: float | None) -> str | None:
     """Convert seconds to MM:SS format (e.g. 125.43 -> '02:05')."""
     if seconds is None:

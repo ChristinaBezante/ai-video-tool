@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import shutil
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from fastapi.staticfiles import StaticFiles
 from video_processing import extract_audio
@@ -11,14 +12,24 @@ from video_processing import extract_frames, normalize_video
 from whisper import transcribe_audio_chunks
 import json
 import uuid
-from bert import create_embeddings_from_transcript, embed_query
-from frame_embeddings import create_frame_embeddings, embed_text_clip
+from bert import create_embeddings_from_transcript, embed_query, warm_up as warm_text_model
+from frame_embeddings import create_frame_embeddings, embed_text_clip, warm_up as warm_clip_model
 from qdrant_store import ensure_collections, store_text_embeddings, store_frame_embeddings, clear_collections
 from qdrant_store import client, TEXT_COLLECTION, FRAME_COLLECTION, search_text, search_frames, scroll_all_text
 
 from llama import ask_llama
 
 from pydantic import BaseModel
+import sys
+
+# Progress output uses ✓ / ✗ / ↻ / ⏱. A non-interactive Windows process gets a
+# cp1252 stdout, where printing any of those raises UnicodeEncodeError -- and
+# since those prints sit inside the pipeline's try blocks, the encoding error
+# was being reported as a processing failure. Reconfigure once, here, so a
+# progress line can never fail a job.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 class Question(BaseModel):
     question: str
@@ -277,6 +288,33 @@ CURRENT_VIDEO_ID = _initialize_current_video_id()
 app = FastAPI()
 
 ensure_collections()  # Create Qdrant collections if they don't exist
+
+
+def _warm_models():
+    """Load the embedding models on a background thread at boot.
+
+    Both load lazily on first use, so without this the first upload after every
+    restart pays the text model inside the request. Measured on this machine:
+    39.3s to load MiniLM against 0.29s to actually embed 52 segments. CLIP is
+    the larger model and was landing inside the first /ask the same way.
+
+    Sequential, not parallel: they are memory-heavy and running them at once
+    just makes both slower.
+    """
+    try:
+        warm_text_model()
+        print("[Warmup] text embedding model ready")
+    except Exception as exc:
+        print(f"[Warmup] text embedding model failed: {exc}")
+
+    try:
+        warm_clip_model()
+        print("[Warmup] CLIP model ready")
+    except Exception as exc:
+        print(f"[Warmup] CLIP model failed: {exc}")
+
+
+threading.Thread(target=_warm_models, daemon=True).start()
 
 # CORS is open here to simplify local frontend/backend integration.
 # In production this should be restricted to known frontend origins.
@@ -600,7 +638,6 @@ def _process_upload_job(
         _update_shared_json(EMBEDDINGS_PATH, embeddings)
 
         total_time_sec = time.perf_counter() - start_time
-        print(f"⏱ Full upload-to-embeddings pipeline for {video_path.stem} took {total_time_sec:.1f}s")
 
         result = {
             "filename": filename,
@@ -615,10 +652,17 @@ def _process_upload_job(
             "total_time_sec": round(total_time_sec, 1),
         }
         _set_job_status(job_id, status="completed", stage="completed", progress=100, result=result)
+
+        # Logged last, on purpose: if the console cannot encode this line, a
+        # successful job must not be turned into a failed one.
+        print(f"[Pipeline] Upload-to-embeddings finished for {video_path.stem} in {total_time_sec:.1f}s")
     except Exception as e:
         total_time_sec = time.perf_counter() - start_time
-        print(f"⏱ Upload pipeline failed after {total_time_sec:.1f}s: {e}")
+        # Recorded before logging, for the same reason. Logging first meant a
+        # failing print skipped this call, so the job reported the print's
+        # encoding error instead of the actual cause.
         _set_job_status(job_id, status="failed", stage="failed", progress=100, error=str(e))
+        print(f"[Pipeline] Upload pipeline failed after {total_time_sec:.1f}s: {e}")
 
 
 class YoutubeRequest(BaseModel):

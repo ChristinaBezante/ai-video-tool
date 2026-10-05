@@ -1,18 +1,24 @@
 # AI Video Tool
 
-Upload a video (or paste a YouTube link) and chat with it. The backend transcribes the audio, embeds the transcript and keyframes into a vector store, and answers questions about the video in natural language, citing the exact moments the answer came from.
+Upload a video (or paste a YouTube link) and chat with it. The backend transcribes the audio, embeds the transcript (and key frames) into a vector store, and answers natural-language questions about the video — with timestamps, code snippets, and Mermaid diagrams when relevant.
 
-## What it does
+## Features
 
-You drop in a video or a YouTube URL and it gets transcribed (OpenAI Whisper, chunked and parallelized so long videos don't take forever), with the transcript embedded locally via `sentence-transformers` and keyframes embedded with CLIP, both stored in a local Qdrant instance. From there you can ask questions in a chat interface and get answers grounded in the transcript, with clickable `[mm:ss–mm:ss]` timestamps so you can jump straight to the part of the video being referenced. It handles both Greek and English depending on what you ask. For coding tutorials it'll pull out code snippets with their timestamps, and for data-structure questions it'll draw a Mermaid diagram if that helps explain things. The video player itself is a themed video.js setup with proper seeking (the usual "raw upload can't be scrubbed accurately" problem is fixed via faststart remuxing on upload).
+- **Video upload or YouTube import** — drop a file or paste a link; processing runs as a background job with live progress polling.
+- **Automatic transcription** — audio is chunked and transcribed in parallel (OpenAI Whisper API, with Hugging Face fallback).
+- **Semantic search over transcript + frames** — transcript segments are embedded locally (`sentence-transformers`) and stored in Qdrant; keyframes are embedded with CLIP for visual search.
+- **Conversational Q&A (`/ask`)** — retrieval-augmented answers that cite the exact `[mm:ss–mm:ss]` moments in the video the answer is grounded in, with multi-turn conversation history.
+- **Greek + English support** — detects the question/transcript language and answers accordingly.
+- **Rich answers** — inline timestamp badges you can click to seek, fenced code snippets for coding tutorials, and auto-generated Mermaid diagrams for data-structure questions.
+- **Custom video player** — video.js-based player with a themed overlay UI and accurate seeking (faststart/moov-atom normalization on upload).
 
-## Stack
+## Tech Stack
 
-Backend is FastAPI, with Qdrant running locally (file-based, no external service needed), ffmpeg for audio/video processing, the OpenAI Whisper API for transcription, `sentence-transformers` for text embeddings, CLIP for frame embeddings, and `yt-dlp` for YouTube downloads.
+**Backend** — FastAPI, Qdrant (local, file-based), ffmpeg, OpenAI Whisper API, `sentence-transformers`, CLIP (`transformers`/`torch`), `yt-dlp`.
 
-Frontend is React 19 on Vite, with video.js for playback, `react-markdown` + Mermaid for rendering answers, and Framer Motion / GSAP / three.js for the visual effects around the UI.
+**Frontend** — React 19 + Vite, video.js, `react-markdown`, Mermaid, Framer Motion / GSAP / three.js for visual effects.
 
-## Project layout
+## Project Structure
 
 ```
 backend/
@@ -21,23 +27,28 @@ backend/
   whisper.py           Chunked/parallel audio transcription
   bert.py              Transcript text embeddings (sentence-transformers)
   frame_embeddings.py  Frame/CLIP embeddings
-  qdrant_store.py      Qdrant collections, storage, and search
+  qdrant_store.py       Qdrant collections, storage, and search
   llama.py             LLM prompt + answer generation
   uploads/             Saved/normalized video files (served at /uploads)
   audio/               Extracted audio + transcript/embedding JSON
   frames/              Extracted keyframes + embeddings
-  qdrant_data/          Local Qdrant storage
+  qdrant_data/         Local Qdrant storage
 
 frontend/
   src/components/      React UI (video player, chatbot, upload flow, etc.)
   src/styles/          Component CSS
 ```
 
-## Getting it running
+## Prerequisites
 
-You'll need Python 3.11+, Node 18+, [ffmpeg](https://ffmpeg.org/) on your `PATH`, and an OpenAI API key for transcription and chat.
+- Python 3.11+ (a project virtual environment is recommended)
+- Node.js 18+
+- [ffmpeg](https://ffmpeg.org/) available on your `PATH`
+- An OpenAI API key (for transcription + chat completions)
 
-For the backend:
+## Setup
+
+### Backend
 
 ```powershell
 cd backend
@@ -46,25 +57,44 @@ python -m venv ../.venv
 pip install -r requirements.txt
 ```
 
-Drop a `.env` file in `backend/`:
+Create a `.env` file in `backend/` with:
 
 ```
 OPENAI_API_KEY=sk-...
-# optional
+# Optional fallbacks / overrides
 HF_TOKEN=
 OPENAI_TRANSCRIPTION_MODEL=whisper-1
 WHISPER_LANGUAGE=
 ```
 
-Then run it with `uvicorn main:app --reload --port 8000`.
+Run the API:
 
-For the frontend, it's the usual `cd frontend && npm install && npm run dev`. It talks to `http://localhost:8000` by default; if your backend lives somewhere else (a tunnel, for example), set `VITE_API_URL` in `frontend/.env.local`.
+```powershell
+uvicorn main:app --reload --port 8000
+```
 
-## Using it
+### Frontend
 
-Start both servers, open the frontend (defaults to `http://localhost:5173`), and upload a video or paste a YouTube URL. A progress bar tracks extraction/transcription/embedding while it processes. Once it's done, just ask questions in the chat — answers will point back to specific moments in the video, and clicking a timestamp seeks the player there.
+```powershell
+cd frontend
+npm install
+npm run dev
+```
 
-## API endpoints
+By default the frontend talks to `http://localhost:8000`. To point it elsewhere (e.g. a tunnel/remote backend), create `frontend/.env.local`:
+
+```
+VITE_API_URL=https://your-backend-url
+```
+
+## Usage
+
+1. Start the backend (`uvicorn main:app --reload --port 8000`) and frontend (`npm run dev`).
+2. Open the frontend (default `http://localhost:5173`), upload a video or paste a YouTube URL.
+3. Wait for processing to complete (progress bar shows extraction/transcription/embedding stages).
+4. Ask questions in the chat — answers reference specific moments in the video, with clickable timestamps to seek the player.
+
+## Key API Endpoints
 
 | Endpoint | Method | Description |
 |---|---|---|
@@ -74,6 +104,7 @@ Start both servers, open the frontend (defaults to `http://localhost:5173`), and
 | `/ask` | POST | Ask a question about the current video (supports `history` for follow-ups) |
 | `/uploads/*`, `/audio/*` | GET | Static files for the processed video/audio |
 
-## A couple of things worth knowing
+## Notes
 
-Qdrant runs locally out of `backend/qdrant_data/`, so there's nothing external to stand up. Also, the app only keeps one video "active" at a time — uploading a new one clears out the previous video's vectors and transcript data, so it's not meant for juggling multiple videos simultaneously yet.
+- Qdrant runs locally (file-backed at `backend/qdrant_data/`), so no external vector DB is required.
+- Only one video is "active" at a time — uploading a new video clears the previous one's vectors and transcript/embedding JSON.

@@ -1,6 +1,28 @@
 /* ── Page content wrapper + vertical progress bar ── */
+/* ── Page content wrapper + vertical progress bar ──
+   One continuous wash for the whole page. The per-section gradients met at
+   hard colour boundaries, which is what made the sections read as separate
+   slabs. Every section below is transparent and sits on this. */
 .page-content-wrap {
   position: relative;
+  /* One rail gradient for the entire page, so the cue track and the prompt card
+     physically cannot drift apart. */
+  --rail-gradient: linear-gradient(
+    90deg,
+    rgba(124, 58, 237, 0.55) 0%,
+    rgba(192, 38, 211, 0.45) 50%,
+    rgba(255, 59, 154, 0.4) 100%
+  );
+  background: linear-gradient(
+    180deg,
+    #0A121C 0%,
+    #0B1523 14%,
+    #101B2F 32%,
+    #15223A 48%,
+    #121C30 66%,
+    #0C1523 85%,
+    #0A121C 100%
+  );
 }
 
 /* ── Back to Top button: plain vertical text on the right, fades in once scrolled ── */
@@ -124,41 +146,55 @@
 
 .main-hero {
   width: 100%;
-  min-height: calc(100vh - 0px);
+  /* The header occupies the top ~74px, so the hero is sized to the remaining
+     viewport — at a full 100vh the bottom edge, and the scrubber pinned to it,
+     fall below the fold. */
+  min-height: calc(100vh - 74px);
   display: flex;
   align-items: center;
-  padding: 0 16px 56px;
+  /* Clears the scrubber: its timestamp badge overhangs the track by ~59px once
+     a video is loaded, so the copy needs to sit above that. */
+  padding: 0 16px 112px;
   position: relative;
-  background: #0A121C;
+  /* Transparent — the page wrapper carries the one continuous background. */
+  background: transparent;
   overflow: hidden;
 }
 
 
 .hero-panel {
-  max-width: 1280px;
+  max-width: 1080px;
   margin: 0 auto;
   width: 100%;
-  padding: 84px 0 0;
-  display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.12fr);
-  gap: 48px;
+  min-width: 0;
+  padding: 96px 0 0;
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  text-align: center;
+  /* Keeps the hero content above the particle canvas, so the headline is not
+     painted over and the CTAs stay clickable. */
+  position: relative;
+  z-index: 1;
 }
 
 .hero-copy {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 28px;
+  width: 100%;
+  min-width: 0;
 }
 
 .hero-copy h1 {
   font-family: var(--font-sans);
-  font-size: clamp(3.2rem, 4.8vw, 4.8rem);
+  font-size: clamp(3.5rem, 5.2vw, 5.4rem);
   font-weight: 700;
   line-height: 0.95;
   letter-spacing: -1.2px;
   margin: 0;
-  max-width: 680px;
+  max-width: 820px;
 }
 
 .hero-gradient {
@@ -175,9 +211,10 @@
   color: rgba(255, 255, 255, 0.78);
   font-family: 'Inter', system-ui, sans-serif;
   font-weight: 500;
-  font-size: 18px;
-  line-height: 1.9;
-  max-width: 560px;
+  font-size: 19px;
+  line-height: 1.85;
+  width: 100%;
+  max-width: 700px;
   min-height: 3.8em; /* prevents layout shift while typing */
 }
 
@@ -203,67 +240,48 @@
   display: flex;
   gap: 16px;
   flex-wrap: wrap;
+  justify-content: center;
 }
 
-.hero-visual {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.hero-float-wrapper {
-  position: relative;
-  width: 100%;
-  /* Increased from 560px. Adjust this number higher or lower to find the perfect size */
-  max-width: 650px; 
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 32px 0 48px;
-}
-
-.hero-glow-orb {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -55%);
-  width: 520px; 
-  height: 520px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(200, 50, 140, 0.32) 0%, rgba(124, 58, 237, 0.18) 45%, transparent 70%);
-  filter: blur(56px);
-  z-index: 0;
+/* ── ASCII brand mark ── */
+.hero-ascii {
+  /* The block hugs its widest row and centres as a unit, while each row stays
+     left-aligned so the art's internal columns never drift. */
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+  text-align: left;
+  white-space: pre;
+  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: clamp(0.44rem, 0.88vw, 0.86rem);
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: 0;
+  background: linear-gradient(90deg, #ff3b9a 0%, #7c3aed 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 0 24px rgba(255, 59, 154, 0.3));
+  user-select: none;
   pointer-events: none;
+  animation: hero-entry 0.8s ease both;
 }
 
-.hero-float-image {
-  position: relative;
+.hero-ascii-compact {
+  display: none;
+  font-size: clamp(0.66rem, 3vw, 0.95rem);
+  line-height: 1.15;
+}
+
+/* ── Discover ──
+   The old transition ramp peaked at #424B72, which washed the tiles out and
+   read as haze. This lifts and falls far more gently, and still lands exactly
+   on the About section's opening colour. */
+/* ── Discover ── */
+.discover-section {
   width: 100%;
-  height: auto;
-  object-fit: contain;
-  z-index: 1;
-  filter:
-    drop-shadow(0 8px 40px rgba(200, 50, 140, 0.30))
-    drop-shadow(0 0 24px rgba(124, 58, 237, 0.22));
-  -webkit-mask-image: radial-gradient(ellipse 78% 78% at 52% 50%, black 38%, transparent 80%);
-  mask-image: radial-gradient(ellipse 78% 78% at 52% 50%, black 38%, transparent 80%);
-}
-
-.hero-glow-ground {
-  position: absolute;
-  bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 62%;
-  height: 28px;
-  background: radial-gradient(ellipse, rgba(190, 50, 130, 0.35) 0%, transparent 72%);
-  filter: blur(18px);
-  z-index: 0;
-  pointer-events: none;
-}
-
-.main-transition {
-  width: 100%;
-  background: linear-gradient(180deg, #0A121C 0%, #0A121C 18%, #17263f 32%, #2F345F 44%, #424B72 54%, #3C4469 64%, #2D3457 74%, #1B2439 88%, #0F1724 100%);
   position: relative;
   overflow: hidden;
 }
@@ -277,14 +295,12 @@
   -webkit-mask-image: linear-gradient(to bottom, black 0%, black 70%, transparent 100%);
 }
 
-.main-transition-inner {
+.discover-inner {
   width: 100%;
-  max-width: 1280px;
+  max-width: 1180px;
   margin: 0 auto;
-  min-height: 760px;
-  padding: 120px 16px 100px;
+  padding: 116px 16px 108px;
   box-sizing: border-box;
-  background: transparent;
   position: relative;
   z-index: 1;
   scroll-margin-top: 100px;
@@ -292,13 +308,12 @@
 
 .about-section {
   width: 100%;
-  background: linear-gradient(180deg, #0F1724 0%, #0D151F 20%, #0B131B 45%, #0A121C 70%, #0A121C 100%);
   position: relative;
 }
 
 .about-section-inner {
   width: 100%;
-  max-width: 1280px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 100px 16px 120px;
   box-sizing: border-box;
@@ -306,207 +321,182 @@
   z-index: 1;
 }
 
-.about-head {
-  margin-bottom: 48px;
-}
 
-.about-head h2 {
-  margin: 0;
-  font-size: clamp(2.4rem, 3vw, 2.9rem);
-  line-height: 1.06;
-  letter-spacing: -0.04em;
-  color: #F8FAFC;
-}
 
-.about-layout {
+/* ── About layout ──
+   Story and facts on the left, the prompt running beside them. */
+.about-grid {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(360px, 0.9fr);
-  gap: 48px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
+  gap: 56px;
   align-items: start;
 }
 
-.about-copy {
-  color: #E2E8F0;
+/* ── Askable questions ──
+   The section asks itself questions; picking one answers it in the terminal
+   beside it. Left alone it walks the list, so nothing on the page is still. */
+.about-questions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-.about-copy p {
-  margin: 0 0 20px;
-  max-width: 560px;
-  color: rgba(226, 232, 240, 0.82);
-  font-size: 1rem;
-  line-height: 1.85;
-}
-
-.about-copy p:last-of-type {
-  margin-bottom: 0;
-}
-
-/* ── Terminal-style search demo ── */
-.about-demo {
-  border-radius: 16px;
-  background: rgba(8, 12, 20, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
-}
-
-.about-demo-topbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.about-demo-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.about-demo-dot-r { background: #ff5f57; }
-.about-demo-dot-y { background: #febc2e; }
-.about-demo-dot-g { background: #28c840; }
-
-.about-demo-path {
-  margin-left: 8px;
-  color: rgba(226, 232, 240, 0.5);
-  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', monospace;
-  font-size: 0.78rem;
-}
-
-.about-demo-body {
-  padding: 24px 22px 28px;
-  min-height: 180px;
-}
-
-.about-demo-line {
+.about-question {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', monospace;
-  font-size: 0.98rem;
-}
-
-.about-demo-prompt {
-  color: #ff3b9a;
-  font-weight: 700;
-}
-
-.about-demo-query {
-  color: #F8FAFC;
-  word-break: break-word;
-}
-
-.about-demo-cursor {
-  color: #ff3b9a;
-}
-
-.about-demo-result {
-  display: flex;
-  align-items: flex-start;
   gap: 12px;
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  width: 100%;
+  padding: 15px 12px 15px 6px;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: none;
+  color: rgba(226, 232, 240, 0.6);
+  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 0.94rem;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.25s ease, background 0.25s ease, padding-left 0.25s ease;
+}
+
+.about-question:hover {
+  padding-left: 12px;
+  color: rgba(248, 250, 252, 0.9);
+}
+
+.about-question.is-active {
+  padding-left: 12px;
+  color: #F8FAFC;
+  background: linear-gradient(90deg, rgba(255, 59, 154, 0.1), transparent 72%);
+}
+
+.about-question-mark {
+  flex: none;
+  color: rgba(255, 59, 154, 0.45);
+  transition: color 0.25s ease;
+}
+
+.about-question.is-active .about-question-mark {
+  color: #ff3b9a;
+}
+
+.answer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.prompt-reply {
   opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 0.4s ease, transform 0.4s ease;
+  transform: translateY(4px);
+  transition: opacity 0.45s ease, transform 0.45s ease;
 }
 
-.about-demo-result-visible {
+.prompt-reply.is-lit {
   opacity: 1;
-  transform: translateY(0);
+  transform: none;
 }
 
-.about-demo-badge {
-  flex: 0 0 auto;
-  display: inline-flex;
+/* ── Prompt card ──
+   Same grammar as the cue track above: mono type, the shared rail gradient,
+   the shared timestamp chip, and a marker that ignites at the cited moment. */
+.prompt-card {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(8, 12, 20, 0.5);
+}
+
+.prompt-bar {
+  display: flex;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: rgba(255, 59, 154, 0.14);
-  border: 1px solid rgba(255, 59, 154, 0.3);
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-.about-demo-ts {
-  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', monospace;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #ff8ad0;
+.prompt-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff3b9a;
+  box-shadow: 0 0 8px rgba(255, 59, 154, 0.75);
 }
 
-.about-demo-answer {
-  color: rgba(226, 232, 240, 0.85);
-  font-size: 0.92rem;
+.prompt-label {
+  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(233, 230, 247, 0.42);
+}
+
+.prompt-body {
+  padding: 20px 18px 22px;
+}
+
+.prompt-line {
+  display: flex;
+  gap: 10px;
+  min-height: 1.7em; /* one line; the queries are short enough not to wrap */
+  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 0.9rem;
   line-height: 1.6;
 }
 
-/* ── Founders ── */
-.about-founders {
-  margin-top: 32px;
-}
-
-.about-founder-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 1fr));
-  gap: 16px;
-  margin-top: 18px;
-}
-
-.about-founder-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: border-color 0.25s ease, background 0.25s ease;
-}
-
-.about-founder-card:hover {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-.about-founder-avatar {
-  flex: 0 0 auto;
-  width: 48px;
-  height: 48px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: rgba(124, 58, 237, 0.16);
-  border: 1px solid rgba(124, 58, 237, 0.3);
-  color: #D8C8FF;
-  font-family: 'DM Mono', monospace;
-  font-size: 0.85rem;
+.prompt-glyph {
+  flex: none;
+  color: #ff3b9a;
   font-weight: 700;
 }
 
-.about-founder-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.prompt-query {
+  color: rgba(248, 250, 252, 0.92);
+  word-break: break-word;
 }
 
-.about-founder-name {
-  color: #F8FAFC;
-  font-size: 0.98rem;
-  font-weight: 600;
+.prompt-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -3px;
+  background: #ff3b9a;
+  animation: prompt-blink 1s step-end infinite;
 }
 
-.about-founder-role {
-  color: rgba(196, 181, 253, 0.8);
-  font-size: 0.85rem;
+@keyframes prompt-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+
+
+
+
+
+
+.prompt-answer {
+  margin: 16px 0 0;
+  font-size: 0.92rem;
+  line-height: 1.7;
+  color: rgba(226, 232, 240, 0.82);
+}
+
+@media (max-width: 1000px) {
+  .about-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-cursor { animation: none; }
+  .prompt-reply { transition: none; }
 }
 
 @media (max-width: 960px) {
-  .about-layout {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 650px) {
@@ -514,19 +504,6 @@
     padding: 80px 16px 80px;
   }
 
-  .about-head h2 {
-    font-size: 2.4rem;
-  }
-
-  .about-founder-list {
-    grid-template-columns: 1fr;
-  }
-}
-
-.feature-head {
-  text-align: center;
-  color: #F8FAFC;
-  margin-bottom: 48px;
 }
 
 .feature-heading-accent {
@@ -536,162 +513,328 @@
   background-clip: text;
 }
 
-.feature-head .eyebrow {
-  margin: 0 auto 12px;
-  color: #C4B5FD;
+/* ── Shared chapter heading ──
+   The heading is a subtitle track you scrub. As a section scrolls past, each
+   word brightens and rises in turn, the rail beneath it fills behind a
+   playhead, and the paragraph sits below. It is the product's own gesture —
+   scrubbing a timeline and watching the words land on the moment.
+
+   Progress arrives as --p on .chapter-head, written by the rAF loop that
+   already drives the page rail, so this adds no listener of its own. --p
+   defaults to 1 in the word rule: without JavaScript the heading is simply
+   lit, never invisible. */
+/* Centred, on the hero's axis. */
+.chapter-head {
+  max-width: 800px;
+  margin: 0 auto 56px;
+  text-align: center;
+}
+
+/* The container does not fade as a block; its words carry the motion. */
+.chapter-head.reveal {
+  opacity: 1;
+  transform: none;
+  transition: none;
+}
+
+.chapter-title {
+  margin: 0 0 22px;
+  font-family: var(--font-sans);
+  font-size: clamp(2.3rem, 3.6vw, 3.1rem);
   font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  font-size: 0.8rem;
+  line-height: 1.08;
+  letter-spacing: -1.2px;
+  color: #F8FAFC;
 }
 
-.feature-head h2 {
-  margin: 0;
-  font-size: clamp(2.2rem, 2.7vw, 3rem);
-  line-height: 1.05;
-  color: #FFFFFF;
+.chapter-word {
+  display: inline-block;
 }
 
-.feature-grid {
+.chapter-word-inner {
+  display: inline-block;
+  /* --raw is this word's own progress; --t clamps it to 0..1 so the word can
+     resolve before the next one starts. */
+  --raw: calc((var(--p, 1) - var(--i, 0) * var(--step, 0.2)) / 0.2);
+  --t: clamp(0, var(--raw), 1);
+  opacity: calc(0.13 + var(--t) * 0.87);
+  transform: translateY(calc((1 - var(--t)) * 0.18em));
+}
+
+/* About sits left-aligned by request; Discover stays on the centre axis.
+   Its rail runs to the same measure as the lede beneath it, so the heading
+   reads as one column. Discover carries no rail at all. */
+.chapter-head-left {
+  max-width: none;
+  margin-right: auto;
+  margin-left: 0;
+  text-align: left;
+}
+
+.chapter-head-left .chapter-scrub {
+  width: 620px;
+  max-width: 100%;
+  margin-right: auto;
+  margin-left: 0;
+}
+
+.chapter-head-left .chapter-lede {
+  margin-right: auto;
+  margin-left: 0;
+}
+
+/* The section's own scrubber: an empty rail that fills behind a playhead, and
+   a real control — grab it and drag to scrub the title by hand. */
+.chapter-scrub {
   position: relative;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(260px, 1fr));
-  gap: 28px;
-  margin-bottom: 48px;
+  width: 320px;
+  max-width: 100%;
+  height: 2px;
+  margin: 0 auto 22px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: grab;
+  touch-action: none; /* horizontal drags belong to the scrubber, not the page */
+  outline: none;
+  transition: background 0.2s ease;
 }
 
-.feature-grid::before {
+/* The bar is only 2px tall, so give it a hit area you can actually catch. */
+.chapter-scrub::before {
   content: '';
   position: absolute;
-  top: 50%;
-  left: 16px;
-  right: 16px;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.12);
-  transform: translateY(-50%);
-  z-index: 0;
+  inset: -14px 0;
 }
 
-.feature-card {
-  position: relative;
-  overflow: hidden;
-  border-radius: 32px;
-  padding: 38px 28px 30px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(16px);
-  box-shadow: 0 28px 80px rgba(10, 18, 28, 0.18);
-  z-index: 1;
-  transition: transform 0.25s ease, background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-}
-
-.feature-card:hover {
-  transform: translateY(-10px);
+.chapter-scrub:hover,
+.chapter-scrub:focus-visible {
   background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.18);
-  box-shadow: 0 36px 100px rgba(10, 18, 28, 0.24);
 }
 
-.feature-card-1:hover {
-  background: rgba(255, 93, 157, 0.18);
-  border-color: rgba(255, 93, 157, 0.24);
+.chapter-scrub:active {
+  cursor: grabbing;
 }
 
-.feature-card-2:hover {
-  background: rgba(124, 69, 255, 0.18);
-  border-color: rgba(124, 69, 255, 0.24);
+.chapter-scrub:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 59, 154, 0.5);
 }
 
-.feature-card-3:hover {
-  background: rgba(84, 214, 255, 0.18);
-  border-color: rgba(84, 214, 255, 0.24);
-}
-
-.feature-number {
+.chapter-scrub-line {
   position: absolute;
-  top: 26px;
-  right: 26px;
-  font-size: 4.5rem;
-  color: rgba(255, 255, 255, 0.18);
-  font-weight: 700;
-  line-height: 1;
+  inset: 0;
+  border-radius: 2px;
+  background: var(--rail-gradient);
+  transform: scaleX(var(--p, 0));
+  transform-origin: left center;
 }
 
-.feature-icon {
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
+.chapter-scrub-head {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--p, 0) * 100%);
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #7C3AED 0%, #4C6DFF 100%);
-  color: #FFFFFF;
-  margin-bottom: 24px;
-  font-size: 1.4rem;
-  transition: transform 0.25s ease, background 0.25s ease;
+  background: #ff3b9a;
+  box-shadow: 0 0 0 4px rgba(255, 59, 154, 0.16);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-.feature-card-1:hover .feature-icon {
-  background: linear-gradient(135deg, #FF5DA5 0%, #FF8BCA 100%);
+/* Signals that the playhead can be taken hold of. */
+.chapter-scrub:hover .chapter-scrub-head,
+.chapter-scrub:focus-visible .chapter-scrub-head {
+  transform: scale(1.4);
+  box-shadow: 0 0 0 7px rgba(255, 59, 154, 0.22);
 }
 
-.feature-card-2:hover .feature-icon {
-  background: linear-gradient(135deg, #9D7CFF 0%, #7C3AED 100%);
+/* Same family and weight as the hero paragraph, a step down in size and
+   brightness. Matching the hero's 19px exactly was wrong: 19px is subordinate
+   under a 5.4rem hero headline, but under a 3.1rem section title it was nearly
+   half the title's size, which flattened the hierarchy. */
+.chapter-lede {
+  margin: 0 auto;
+  max-width: 620px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.72;
+  color: rgba(255, 255, 255, 0.72);
 }
 
-.feature-card-3:hover .feature-icon {
-  background: linear-gradient(135deg, #5ED1FF 0%, #3CB7FF 100%);
-}
-
-.feature-card:hover .feature-icon {
-  transform: scale(1.08);
-}
-
-.feature-card h3 {
-  margin: 0 0 14px;
-  color: #FFFFFF;
-  font-size: 1.25rem;
-}
-
-.feature-card p {
-  margin: 0;
-  color: rgba(248, 250, 252, 0.78);
-  line-height: 1.85;
-}
-
-.feature-cta {
-  display: flex;
-  justify-content: center;
-}
-
-.btn-card-cta {
-  padding: 14px 36px;
-  border-radius: 999px;
-  letter-spacing: 0.01em;
-  box-shadow: 0 20px 48px rgba(124, 58, 237, 0.16);
-}
-
-.feature-cta .btn-primary {
-  padding: 16px 42px;
-}
-
-.btn-card-cta:hover {
-  transform: translateY(-1px);
-}
-
-@media (max-width: 960px) {
-  .feature-grid {
-    grid-template-columns: 1fr;
+/* Scrubbing is decoration; the words must stay readable. */
+@media (prefers-reduced-motion: reduce) {
+  .chapter-word-inner {
+    opacity: 1;
+    transform: none;
   }
+  .chapter-scrub-head {
+    display: none;
+  }
+}
+
+/* ── Cue track ──
+   The section's content is laid out as markers on a timeline, echoing the
+   scrubber in the hero and the numbered chapters in the nav. */
+.cue-track {
+  position: relative;
+}
+
+.cue-rail {
+  position: absolute;
+  top: 48px;
+  left: 0;
+  /* Markers sit at each column's left edge, so stop the rail at the last one
+     rather than letting it dangle to the grid edge: one column width back. */
+  right: calc((100% - 104px) / 5);
+  height: 1px;
+  background: var(--rail-gradient);
+}
+
+.cue-list {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 26px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cue {
+  position: relative;
+  padding-top: 66px;
+}
+
+.cue-time {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: rgba(233, 230, 247, 0.5);
+}
+
+.cue-node {
+  position: absolute;
+  top: 43px;
+  left: 0;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #0A121C;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.cue:hover .cue-node {
+  background: #ff3b9a;
+  border-color: #ff3b9a;
+  box-shadow: 0 0 0 4px rgba(255, 59, 154, 0.16);
+}
+
+.cue-title {
+  margin: 0 0 8px;
+  font-size: 0.98rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #F8FAFC;
+}
+
+.cue-copy {
+  margin: 0 0 14px;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  color: rgba(226, 232, 240, 0.6);
+}
+
+.cue-art {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.cue-art-console {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 9px;
+  background: rgba(8, 12, 20, 0.55);
+  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 0.76rem;
+}
+
+.cue-prompt { color: #ff3b9a; font-weight: 700; }
+
+.cue-query { color: rgba(248, 250, 252, 0.8); }
+
+.cue-chip {
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 59, 154, 0.3);
+  border-radius: 6px;
+  background: rgba(255, 59, 154, 0.14);
+  color: #ff8ad0;
+  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.cue-tag {
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(226, 232, 240, 0.8);
+  font-size: 0.76rem;
+}
+
+.cue-code {
+  max-width: 100%;
+  padding: 6px 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: rgba(8, 12, 20, 0.55);
+  color: rgba(216, 200, 255, 0.9);
+  font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cue-art-frames span {
+  width: 26px;
+  height: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 4px;
+  background: linear-gradient(150deg, rgba(124, 58, 237, 0.32), rgba(10, 18, 28, 0.5));
+}
+
+.cue-art-frames span:nth-child(2n) { opacity: 0.75; }
+
+@media (max-width: 1100px) {
+  /* The rail only reads as a timeline while the markers sit side by side. */
+  .cue-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 30px 26px;
+  }
+  .cue-rail { display: none; }
+  .cue { padding-top: 0; }
+  .cue-time {
+    position: static;
+    display: block;
+    margin-bottom: 8px;
+  }
+  .cue-node { display: none; }
 }
 
 @media (max-width: 650px) {
-  .main-transition-inner {
-    padding: 100px 16px 80px;
-  }
-
-  .feature-head h2 {
-    font-size: 2rem;
-  }
+  .cue-list { grid-template-columns: minmax(0, 1fr); }
+  .chapter-head { margin-bottom: 36px; }
 }
 
 .btn {
@@ -719,9 +862,36 @@
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #7c3aed 0%, #bfacfc 55%, #ff5ba8 100%);
+  /* The brand ramp, doubled into a palindromic 2×-wide image:
+     pink → violet → purple → violet → pink.
+     At rest the button shows exactly the pink → violet → purple half; the
+     animation carries it into the reversed half and back, so the colour flows
+     along the button and loops with no seam (offset 200% lands on the next
+     tile, which is pixel-identical to offset 0). */
+  background: linear-gradient(
+    90deg,
+    #ff3b9a 0%,
+    #b13ae0 25%,
+    #7c3aed 50%,
+    #b13ae0 75%,
+    #ff3b9a 100%
+  );
+  background-size: 200% 100%;
+  animation: btn-flow 6s linear infinite;
   color: #FFFFFF;
-  box-shadow: 0 18px 42px rgba(124, 58, 237, 0.22);
+  box-shadow: 0 18px 42px rgba(124, 58, 237, 0.26);
+}
+
+@keyframes btn-flow {
+  from { background-position: 0% 50%; }
+  to   { background-position: 200% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary {
+    animation: none;
+    background-position: 0% 50%;
+  }
 }
 
 .btn-secondary {
@@ -872,7 +1042,6 @@
 
 @media (max-width: 900px) {
   .hero-panel {
-    grid-template-columns: 1fr;
     padding: 60px 24px 40px;
   }
 
@@ -882,6 +1051,18 @@
 
   .hero-card {
     min-height: 320px;
+  }
+}
+
+/* Below this width the wide wordmark stops being legible, so the compact
+   ASCII badge takes over. */
+@media (max-width: 780px) {
+  .hero-ascii-wide {
+    display: none;
+  }
+
+  .hero-ascii-compact {
+    display: block;
   }
 }
 
@@ -917,7 +1098,6 @@
 .hero-copy h1       { animation: hero-entry 0.75s ease both; }
 .hero-copy p        { animation: hero-entry 0.75s ease 0.14s both; }
 .hero-actions       { animation: hero-entry 0.75s ease 0.28s both; }
-.hero-float-wrapper { animation: hero-entry 0.85s ease 0.20s both; }
 
 /* ── Typewriter word ────────────────────────────────── */
 .hero-word {
@@ -929,175 +1109,117 @@
   transform: translateY(10px);
 }
 
-/* ── Animated primary button shimmer ───────────────── */
-@keyframes btn-shimmer {
-  0%   { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
-}
-.btn-primary {
-  background: linear-gradient(110deg, #7c3aed 0%, #c084fc 28%, #ff5ba8 52%, #7c3aed 100%);
-  background-size: 220% auto;
-  animation: btn-shimmer 3.5s linear infinite;
-  color: #FFFFFF;
-  box-shadow: 0 18px 42px rgba(124, 58, 237, 0.28);
+/* ── Hero gradient blobs ──
+   Soft radial-gradient washes drifting through the hero. Each gradient fades
+   to transparent well inside its own box, so there is no edge to see — the
+   blur only smooths the falloff further. They sit under the particles and
+   under the copy.
+
+   Every blob follows its own multi-point path at its own speed, so the field
+   keeps rearranging rather than sliding about as one sheet. */
+.hero-mesh {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Fade the field out before the hero's bottom edge. Without this the blobs
+     are simply clipped by the hero's overflow and stop dead at the boundary,
+     leaving a hard horizontal seam where Discover begins. */
+  mask-image: linear-gradient(to bottom, black 0%, black 66%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, black 66%, transparent 100%);
 }
 
-/* ── Background orbs ────────────────────────────────── */
-.hero-orb {
+.mesh-blob {
   position: absolute;
   border-radius: 50%;
-  pointer-events: none;
-  z-index: 0;
+  filter: blur(48px);
+  animation: mesh-drift 26s ease-in-out infinite;
 }
 
-.hero-orb-1 {
-  width: 560px;
-  height: 560px;
-  top: -140px;
-  left: -80px;
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.20) 0%, transparent 68%);
-  filter: blur(72px);
-  animation: orb-drift-1 14s ease-in-out infinite alternate;
+.mesh-blob-1 {
+  width: 520px;
+  height: 520px;
+  top: -12%;
+  left: -8%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 59, 154, 0.42) 0%,
+    rgba(255, 59, 154, 0.13) 45%,
+    transparent 72%
+  );
+  --x1: 150px;
+  --y1: 200px;
+  --x2: -60px;
+  --y2: 420px;
+  animation-duration: 27s;
 }
 
-.hero-orb-2 {
+.mesh-blob-2 {
+  width: 460px;
+  height: 460px;
+  top: -6%;
+  right: -6%;
+  background: radial-gradient(
+    circle,
+    rgba(124, 58, 237, 0.42) 0%,
+    rgba(124, 58, 237, 0.13) 45%,
+    transparent 72%
+  );
+  --x1: -120px;
+  --y1: 160px;
+  --x2: 80px;
+  --y2: 380px;
+  animation-duration: 31s;
+  animation-delay: -9s;
+}
+
+.mesh-blob-3 {
   width: 420px;
   height: 420px;
-  top: 15%;
-  right: -60px;
-  background: radial-gradient(circle, rgba(255, 59, 154, 0.15) 0%, transparent 68%);
-  filter: blur(64px);
-  animation: orb-drift-2 17s ease-in-out infinite alternate;
+  bottom: -14%;
+  left: 22%;
+  background: radial-gradient(
+    circle,
+    rgba(60, 100, 255, 0.4) 0%,
+    rgba(60, 100, 255, 0.12) 45%,
+    transparent 72%
+  );
+  --x1: 180px;
+  --y1: -140px;
+  --x2: -140px;
+  --y2: -300px;
+  animation-duration: 23s;
+  animation-delay: -15s;
 }
 
-.hero-orb-3 {
-  width: 320px;
-  height: 320px;
-  bottom: 0;
-  left: 38%;
-  background: radial-gradient(circle, rgba(60, 100, 255, 0.13) 0%, transparent 68%);
-  filter: blur(56px);
-  animation: orb-drift-3 11s ease-in-out infinite alternate;
+.mesh-blob-4 {
+  width: 340px;
+  height: 340px;
+  bottom: -10%;
+  right: 16%;
+  background: radial-gradient(
+    circle,
+    rgba(232, 121, 249, 0.36) 0%,
+    rgba(232, 121, 249, 0.1) 45%,
+    transparent 72%
+  );
+  --x1: -110px;
+  --y1: -120px;
+  --x2: 130px;
+  --y2: -260px;
+  animation-duration: 29s;
+  animation-delay: -20s;
 }
 
-@keyframes orb-drift-1 {
-  from { transform: translate(0px,  0px); }
-  to   { transform: translate(70px, 90px); }
-}
-@keyframes orb-drift-2 {
-  from { transform: translate(0px,  0px); }
-  to   { transform: translate(-55px, 65px); }
-}
-@keyframes orb-drift-3 {
-  from { transform: translate(0px,  0px); }
-  to   { transform: translate(45px, -55px); }
+@keyframes mesh-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33%      { transform: translate3d(var(--x1, 0px), var(--y1, 0px), 0) scale(1.08); }
+  66%      { transform: translate3d(var(--x2, 0px), var(--y2, 0px), 0) scale(0.94); }
 }
 
-/* ─────────────────────────────────────────────────────
-   CLICKABLE INSIGHT KEYWORDS
-───────────────────────────────────────────────────── */
-
-.insight-word {
-  position: relative;
-  cursor: pointer;
-  border-bottom: 1px dashed rgba(167, 139, 250, 0.45);
-  transition: border-color 0.2s ease, color 0.2s ease;
-  /* ensure the absolutely-positioned tooltip escapes the paragraph flow */
-  display: inline;
-}
-
-.insight-word:hover,
-.insight-word-open {
-  border-bottom-color: #a78bfa;
-  color: #c4b5fd;
-}
-
-.insight-tooltip {
-  position: absolute;
-  bottom: calc(100% + 13px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 300;
-  width: 244px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 12px 14px;
-  background: rgba(7, 5, 22, 0.97);
-  border: 1px solid rgba(140, 114, 255, 0.40);
-  border-radius: 14px;
-  box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.60),
-    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
-    0 0 28px rgba(124, 77, 255, 0.12);
-  backdrop-filter: blur(24px);
-  pointer-events: none;
-  white-space: normal;
-  animation: insightPop 0.24s cubic-bezier(0.34, 1.3, 0.64, 1) both;
-}
-
-/* Downward arrow */
-.insight-tooltip::after {
-  content: '';
-  position: absolute;
-  bottom: -5px;
-  left: 50%;
-  transform: translateX(-50%) rotate(45deg);
-  width: 9px;
-  height: 9px;
-  background: rgba(7, 5, 22, 0.97);
-  border-right: 1px solid rgba(140, 114, 255, 0.40);
-  border-bottom: 1px solid rgba(140, 114, 255, 0.40);
-}
-
-.insight-tooltip-tag {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 0.67rem;
-  font-family: 'DM Mono', monospace;
-  color: #9f8cff;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.insight-tooltip-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: linear-gradient(135deg, #7c4dff 0%, #ff63b5 100%);
-  box-shadow: 0 0 7px rgba(124, 77, 255, 0.75);
-}
-
-.insight-tooltip-text {
-  font-size: 0.8rem;
-  color: rgba(226, 232, 240, 0.88);
-  line-height: 1.65;
-  display: block;
-}
-
-@keyframes insightPop {
-  0%   { opacity: 0; transform: translateX(-50%) scale(0.86) translateY(8px); }
-  100% { opacity: 1; transform: translateX(-50%) scale(1)    translateY(0); }
-}
-
-/* Prevent tooltip clipping at narrow widths */
-@media (max-width: 480px) {
-  .insight-tooltip {
-    width: 210px;
-    left: 0;
-    transform: none;
-  }
-
-  .insight-tooltip::after {
-    left: 20px;
-    transform: rotate(45deg);
-  }
-
-  @keyframes insightPop {
-    0%   { opacity: 0; transform: scale(0.88) translateY(8px); }
-    100% { opacity: 1; transform: scale(1)    translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .mesh-blob {
+    animation: none;
   }
 }

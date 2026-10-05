@@ -1,40 +1,337 @@
 import Header from './header.jsx'
 import Footer from './Footer.jsx'
 import ParticlesBackground from './ParticlesBackground.jsx';
-import { useEffect, useRef, useState } from 'react';
-import { Star } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from "react-router-dom";
 
-const demoQueries = [
-  { q: 'what did she say about recursion?', ts: '12:41', a: '"Recursion is just a function trusting itself to finish the job."' },
-  { q: 'where do we set up the venv?', ts: '03:08', a: 'Activate the virtual environment before installing anything.' },
-  { q: 'summarize the last 10 minutes', ts: '48:52', a: 'Wraps up error handling, then a live demo of the CLI.' },
+// ASCII brand mark for the hero. Kept as JS constants rather than inline JSX
+// text because JSX strips the per-line indentation that makes the art line up
+// inside <pre>. Wide variant for desktop, compact badge for narrow screens.
+const HERO_ASCII_WIDE = [
+  '  ____   _____   ____    _                    __     __  ___   ____',
+  ' / ___| |_   _| |  _ \\  | |           |       \\ \\   / / |_ _| |  _ \\',
+  '| |       | |   | |_) | | |          -+-       \\ \\ / /   | |  | | | |',
+  '| |___    | |   |  _ <  | |___        |         \\ V /    | |  | |_| |',
+  ' \\____|   |_|   |_| \\_\\ |_____|                  \\_/    |___| |____/',
+].join('\n');
+
+const HERO_ASCII_COMPACT = [
+  '+---------------+',
+  '|  >  CTRL+VID  |',
+  '+---------------+',
+].join('\n');
+
+const ABOUT_QUESTIONS = [
+  {
+    q: 'who built this?',
+    a: 'Christina - Ioanna Bezante and Enterisa Gjozi. Two students who got tired of scrubbing.',
+    chips: [],
+  },
+  {
+    q: 'what does it actually do?',
+    a: 'Turns a recording into something you can question, and cites the second every answer was taken from.',
+    chips: ['cites mm:ss'],
+  },
+  {
+    q: 'does it run on my machine?',
+    a: 'The transcript embeddings and the search index do. Audio goes to the OpenAI API to be transcribed, and the passages behind an answer travel with your question when you ask it.',
+    chips: ['local: embeddings + index', 'remote: transcription + answers'],
+  },
+  {
+    q: 'which languages?',
+    a: 'Greek and English, including lectures that switch language mid-sentence.',
+    chips: ['Ελληνικά', 'English'],
+  },
+  {
+    q: 'what is it built with?',
+    a: 'ffmpeg pulls the audio, Whisper transcribes it, sentence-transformers and CLIP embed it, Qdrant indexes it, FastAPI serves it.',
+    chips: ['ffmpeg', 'Whisper', 'sentence-transformers', 'CLIP', 'Qdrant', 'FastAPI'],
+  },
+  {
+    q: 'what is still missing?',
+    a: 'Speaker labels, and more than one video indexed at a time. Uploading a new one currently clears the last.',
+    chips: ['no speaker labels', 'one video at a time'],
+  },
 ];
 
-const insightData = {
-  speed:    { label: 'How fast?',      text: 'Ask "what happens at minute 34?" and get an answer before you\'d even find the scrubber. No buffering, no waiting — just the moment you need.' },
-  privacy:  { label: 'Your data',      text: 'We never see your videos. Everything runs locally on your machine, so sensitive footage stays exactly where you left it.' },
-  students: { label: 'Built for you',  text: 'Whether it\'s one lecture or an entire semester, you can search everything you\'ve recorded and jump straight to the moment that matters.' },
-  footage:  { label: 'No more scrubbing', text: 'We built this because we were tired of dragging a timeline slider hoping we\'d land on the right scene. There\'s a better way.' },
-};
+/* Chapter headings sit inside a liquid blob. The shape morphs on its own, and
+   leans toward the pointer while a highlight tracks it. The blob is a pseudo
+   element, so the heading stays plain, selectable text. */
+/* One answer. Keyed on the question, so choosing another remounts it and the
+   typewriter restarts without any setState-in-effect. */
+function AboutAnswer({ item }) {
+  const [typed, setTyped] = useState(0);
+  const [answered, setAnswered] = useState(false);
 
-function InsightSpan({ word, active, onToggle }) {
+  useEffect(() => {
+    const timers = [];
+    let typeId = 0;
+
+    timers.push(window.setTimeout(() => {
+      typeId = window.setInterval(() => {
+        setTyped((n) => {
+          if (n >= item.q.length) {
+            window.clearInterval(typeId);
+            return n;
+          }
+          return n + 1;
+        });
+      }, 34);
+    }, 240));
+
+    const typedAt = 240 + item.q.length * 34;
+    timers.push(window.setTimeout(() => setAnswered(true), typedAt + 420));
+
+    return () => {
+      timers.forEach(window.clearTimeout);
+      window.clearInterval(typeId);
+    };
+  }, [item]);
+
   return (
-    <span
-      className={`insight-word${active ? ' insight-word-open' : ''}`}
-      role="button"
-      tabIndex={0}
-      onClick={(e) => { e.stopPropagation(); onToggle(word); }}
-      onKeyDown={(e) => e.key === 'Enter' && onToggle(word)}
-    >
-      {word}
-      {active && (
-        <span className="insight-tooltip" role="tooltip">
-          <span className="insight-tooltip-text">{insightData[word].text}</span>
-        </span>
-      )}
-    </span>
+    <div className="prompt-card">
+      <div className="prompt-bar">
+        <span className="prompt-dot" />
+        <span className="prompt-label">about — ctrl+vid</span>
+      </div>
+
+      <div className="prompt-body">
+        <div className="prompt-line">
+          <span className="prompt-glyph">&gt;</span>
+          <span className="prompt-query">
+            {item.q.slice(0, typed)}
+            <i className="prompt-cursor" />
+          </span>
+        </div>
+
+        <div className={`prompt-reply${answered ? ' is-lit' : ''}`}>
+          <p className="prompt-answer">{item.a}</p>
+          {item.chips.length > 0 && (
+            <div className="answer-chips">
+              {item.chips.map((chip) => (
+                <span key={chip} className="cue-tag">{chip}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
+}
+
+/* The section asks itself questions. Clicking a row answers it in the terminal;
+   left alone it walks through them on its own, so the section is never still. */
+function AboutPrompts() {
+  const [active, setActive] = useState(0);
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setActive((a) => (a + 1) % ABOUT_QUESTIONS.length);
+    }, 7800);
+    return () => window.clearTimeout(id);
+  }, [active, nonce]);
+
+  const pick = (i) => {
+    setActive(i);
+    setNonce((n) => n + 1); // restart the idle countdown on a manual pick
+  };
+
+  return (
+    <div className="about-grid reveal reveal-delay-1">
+      <ol className="about-questions">
+        {ABOUT_QUESTIONS.map((item, i) => (
+          <li key={item.q}>
+            <button
+              type="button"
+              className={`about-question${i === active ? ' is-active' : ''}`}
+              onClick={() => pick(i)}
+            >
+              <span className="about-question-mark">&gt;</span>
+              <span className="about-question-text">{item.q}</span>
+            </button>
+          </li>
+        ))}
+      </ol>
+
+      <div className="about-aside">
+        <AboutAnswer key={active} item={ABOUT_QUESTIONS[active]} />
+      </div>
+    </div>
+  );
+}
+
+/* Writes scrub progress straight to the DOM. Kept at module scope so the
+   effects below need no dependencies beyond refs. */
+function applyProgress(head, rail, value) {
+  if (head) head.style.setProperty('--p', value.toFixed(4));
+  if (rail) rail.setAttribute('aria-valuenow', String(Math.round(value * 100)));
+}
+
+/* A chapter heading is a subtitle track with a real scrubber.
+ *
+ * The title lights up word by word. It plays itself once as the section
+ * arrives, so the words are never left unread — and the rail beneath it is
+ * draggable: grab the playhead and the title scrubs under your hand, the way
+ * you scrub a video. Arrow keys work too, and the rail is a proper slider for
+ * assistive technology.
+ *
+ * Progress lives in a ref and goes straight to a CSS variable, so dragging
+ * never re-renders React. */
+function ChapterHead({ text, accentFrom = 0, lede, align = 'center', scrubber = true }) {
+  const headRef = useRef(null);
+  const railRef = useRef(null);
+  const progress = useRef(0);
+  const dragging = useRef(false);
+
+  // Play once when the heading comes into view.
+  useEffect(() => {
+    const head = headRef.current;
+    const rail = railRef.current;
+    if (!head) return undefined;
+
+    const set = (value) => {
+      progress.current = Math.min(1, Math.max(0, value));
+      applyProgress(head, rail, progress.current);
+    };
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      set(1);
+      return undefined;
+    }
+
+    let raf = 0;
+    let startedAt = 0;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      const run = (now) => {
+        if (!startedAt) startedAt = now;
+        // A drag outranks the autoplay for as long as the pointer is down.
+        if (!dragging.current) set((now - startedAt) / 1500);
+        if (progress.current < 1) raf = window.requestAnimationFrame(run);
+      };
+      raf = window.requestAnimationFrame(run);
+    }, { threshold: 0.5 });
+
+    observer.observe(head);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  // Grab the playhead and scrub by hand.
+  useEffect(() => {
+    const rail = railRef.current;
+    const head = headRef.current;
+    if (!rail) return undefined;
+
+    const set = (value) => {
+      progress.current = Math.min(1, Math.max(0, value));
+      applyProgress(head, rail, progress.current);
+    };
+    const positionOf = (event) => {
+      const rect = rail.getBoundingClientRect();
+      return rect.width ? (event.clientX - rect.left) / rect.width : 0;
+    };
+
+    const onDown = (event) => {
+      dragging.current = true;
+      // Capture keeps the drag alive outside the rail, but a synthetic or
+      // already-released pointer throws — scrubbing should still work.
+      try {
+        rail.setPointerCapture(event.pointerId);
+      } catch {
+        /* not capturable; the move handler still tracks it */
+      }
+      set(positionOf(event));
+    };
+    const onMove = (event) => {
+      if (dragging.current) set(positionOf(event));
+    };
+    const onUp = (event) => {
+      dragging.current = false;
+      try {
+        if (rail.hasPointerCapture(event.pointerId)) rail.releasePointerCapture(event.pointerId);
+      } catch {
+        /* nothing captured; nothing to release */
+      }
+    };
+    const onKey = (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      dragging.current = true; // arrows override the autoplay too
+      set(progress.current + (event.key === 'ArrowRight' ? 0.12 : -0.12));
+    };
+
+    rail.addEventListener('pointerdown', onDown);
+    rail.addEventListener('pointermove', onMove);
+    rail.addEventListener('pointerup', onUp);
+    rail.addEventListener('pointercancel', onUp);
+    rail.addEventListener('keydown', onKey);
+    return () => {
+      rail.removeEventListener('pointerdown', onDown);
+      rail.removeEventListener('pointermove', onMove);
+      rail.removeEventListener('pointerup', onUp);
+      rail.removeEventListener('pointercancel', onUp);
+      rail.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
+  return (
+    <header
+      ref={headRef}
+      className={`chapter-head reveal${align === 'left' ? ' chapter-head-left' : ''}`}
+    >
+      <h2 className="chapter-title">
+        <TitleWords text={text} accentFrom={accentFrom} />
+      </h2>
+
+      {scrubber ? (
+        <div
+          ref={railRef}
+          className="chapter-scrub"
+          role="slider"
+          tabIndex={0}
+          title="Drag to scrub the title"
+          aria-label={`Scrub the heading: ${text}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={0}
+        >
+          <span className="chapter-scrub-line" />
+          <span className="chapter-scrub-head" />
+        </div>
+      ) : null}
+
+      <p className="chapter-lede">{lede}</p>
+    </header>
+  );
+}
+
+/* Chapter titles rise word by word out of a mask, then a gradient rule draws
+   itself and the lede settles in behind it. All three are driven by
+   .reveal-visible, which the page's existing IntersectionObserver already adds
+   to anything carrying .reveal — so this needs no extra JavaScript. */
+function TitleWords({ text, accentFrom = 0 }) {
+  const words = text.split(' ');
+  // Words light up in sequence across the first 82% of the scrub, so the last
+  // one settles just before the rail finishes filling.
+  const step = 0.82 / words.length;
+  return words.map((word, i) => (
+    <Fragment key={`${word}-${i}`}>
+      {i > 0 ? ' ' : null}
+      <span className="chapter-word">
+        <span
+          className={`chapter-word-inner${i >= accentFrom ? ' feature-heading-accent' : ''}`}
+          style={{ '--i': i, '--step': step }}
+        >
+          {word}
+        </span>
+      </span>
+    </Fragment>
+  ));
 }
 
 function MainPage() {
@@ -93,20 +390,7 @@ function MainPage() {
   const typeRef = useRef(null);
   const cursorRef = useRef(null);
   const stepFillRef = useRef(null);
-  const demoQueryRef = useRef(null);
-  const demoResultRef = useRef(null);
-  const demoTsRef = useRef(null);
-  const demoAnswerRef = useRef(null);
   const [tsReady, setTsReady] = useState(false);
-  const [activeInsight, setActiveInsight] = useState(null);
-  const toggleInsight = (word) => setActiveInsight(prev => prev === word ? null : word);
-
-  useEffect(() => {
-    if (!activeInsight) return;
-    const close = () => setActiveInsight(null);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [activeInsight]);
 
   // Show a floating "Back to Top" button once scrolled past the hero.
   // #root is the real scroll container here (see the rAF effect below), so
@@ -152,6 +436,7 @@ function MainPage() {
         );
         fill.style.height = `${Math.min(1, scrollTop / totalH) * trackH}px`;
       }
+
       rafId = requestAnimationFrame(update);
     };
     rafId = requestAnimationFrame(update);
@@ -211,66 +496,6 @@ function MainPage() {
     }
   };
 
-  // Loops through canned searches in the "about" terminal demo: type a
-  // question, reveal the matching timestamp + answer, then erase and repeat.
-  useEffect(() => {
-    let cancelled = false;
-    const timeouts = [];
-    const wait = (ms) => new Promise((resolve) => {
-      timeouts.push(setTimeout(resolve, ms));
-    });
-
-    const typeInto = async (el, text) => {
-      el.textContent = '';
-      for (let i = 0; i < text.length; i++) {
-        if (cancelled) return;
-        el.textContent = text.slice(0, i + 1);
-        await wait(28);
-      }
-    };
-
-    const eraseFrom = async (el) => {
-      const text = el.textContent;
-      for (let i = text.length; i >= 0; i--) {
-        if (cancelled) return;
-        el.textContent = text.slice(0, i);
-        await wait(12);
-      }
-    };
-
-    const run = async () => {
-      let i = 0;
-      while (!cancelled) {
-        const queryEl = demoQueryRef.current;
-        const resultEl = demoResultRef.current;
-        const tsEl = demoTsRef.current;
-        const answerEl = demoAnswerRef.current;
-        if (!queryEl || !resultEl || !tsEl || !answerEl) return;
-
-        const { q, ts, a } = demoQueries[i % demoQueries.length];
-        await typeInto(queryEl, q);
-        if (cancelled) return;
-        await wait(400);
-        tsEl.textContent = ts;
-        answerEl.textContent = a;
-        resultEl.classList.add('about-demo-result-visible');
-        await wait(2800);
-        if (cancelled) return;
-        resultEl.classList.remove('about-demo-result-visible');
-        await wait(400);
-        await eraseFrom(queryEl);
-        await wait(300);
-        i++;
-      }
-    };
-
-    run();
-    return () => {
-      cancelled = true;
-      timeouts.forEach(clearTimeout);
-    };
-  }, []);
-
   const navToUpload = (event) => {
     event.preventDefault()
     navigate("/upload")
@@ -293,9 +518,16 @@ function MainPage() {
         <div className="page-stepper-node psn-3" />
       </div>
       <main className="main-hero" ref={heroRef} onMouseMove={handleHeroMouseMove}>
-        <div className="hero-orb hero-orb-1" />
-        <div className="hero-orb hero-orb-2" />
-        <div className="hero-orb hero-orb-3" />
+        <div className="hero-mesh" aria-hidden="true">
+          <span className="mesh-blob mesh-blob-1" />
+          <span className="mesh-blob mesh-blob-2" />
+          <span className="mesh-blob mesh-blob-3" />
+          <span className="mesh-blob mesh-blob-4" />
+        </div>
+        {/* The hero carried no field of its own — the particles visible just
+            below the fold belong to Discover. This one flows on a single axis,
+            so it reads as footage passing rather than as drifting dots. */}
+        <ParticlesBackground id="hero-particles" flow />
         <div className={`hero-scrubber${tsReady ? ' hero-scrubber-active' : ''}`}>
           <div className="hero-scrubber-labels">
             {scrubTicks.map(({ label, pct }) => (
@@ -314,6 +546,8 @@ function MainPage() {
         </div>
         <section className="hero-panel">
           <div className="hero-copy">
+            <pre className="hero-ascii hero-ascii-wide" role="img" aria-label="Ctrl + Vid">{HERO_ASCII_WIDE}</pre>
+            <pre className="hero-ascii hero-ascii-compact" role="img" aria-label="Ctrl + Vid">{HERO_ASCII_COMPACT}</pre>
             <h1>
               See what video<br />
               analysis <span className="hero-gradient">can</span><br />
@@ -329,50 +563,75 @@ function MainPage() {
               <a className="btn btn-secondary" href="#features">Learn</a>
             </div>
           </div>
-          <div className="hero-visual">
-            <div className="hero-float-wrapper">
-              <div className="hero-glow-orb"></div>
-              <img
-                src="/uploads/scissors-cutting.png"
-                alt="Scissors cutting video frame"
-                className="hero-float-image"
-              />
-              <div className="hero-glow-ground"></div>
-            </div>
-          </div>
         </section>
       </main>
 
-      <section id="features" className="main-transition">
+      <section id="features" className="discover-section">
         <ParticlesBackground id="features-particles" />
-        <div className="main-transition-inner">
-          <div className="feature-head reveal">
-            <h2>
-              Follow these <span className="feature-heading-accent">simple steps</span> to get started
-            </h2>
-          </div>
-          <div className="feature-grid">
-            <article className="feature-card feature-card-1 reveal reveal-delay-1">
-              <div className="feature-number">01</div>
-              <div className="feature-icon">↑</div>
-              <h3>Upload Video</h3>
-              <p>Select and upload your video file to begin the analysis process.</p>
-            </article>
-            <article className="feature-card feature-card-2 reveal reveal-delay-2">
-              <div className="feature-number">02</div>
-              <div className="feature-icon">★</div>
-              <h3>Analyze Content</h3>
-              <p>Our AI processes your video content and extracts key information.</p>
-            </article>
-            <article className="feature-card feature-card-3 reveal reveal-delay-3">
-              <div className="feature-number">03</div>
-              <div className="feature-icon">↓</div>
-              <h3>Retrieve Results</h3>
-              <p>Access your analyzed data and insights in an easy-to-use format.</p>
-            </article>
-          </div>
-          <div className="feature-cta">
-            <a className="btn btn-primary btn-card-cta" href="/upload" onClick={navToUpload}>Start Analysis</a>
+        <div className="discover-inner">
+          <ChapterHead
+            text="Ask the video anything"
+            accentFrom={3}
+            scrubber={false}
+            lede="Ctrl + Vid turns a recording into something you can question. Every answer points back at the second it came from."
+          />
+
+          <div className="cue-track reveal reveal-delay-1">
+            <div className="cue-rail" aria-hidden="true" />
+            <ol className="cue-list">
+              <li className="cue">
+                <span className="cue-time">00:41</span>
+                <span className="cue-node" />
+                <h3 className="cue-title">Ask in plain language</h3>
+                <p className="cue-copy">No keywords, no timestamps, no scrubber.</p>
+                <div className="cue-art cue-art-console">
+                  <span className="cue-prompt">&gt;</span>
+                  <span className="cue-query">where does she define recursion?</span>
+                </div>
+              </li>
+
+              <li className="cue">
+                <span className="cue-time">12:41</span>
+                <span className="cue-node" />
+                <h3 className="cue-title">Answers cite their second</h3>
+                <p className="cue-copy">Grounded in the transcript and tagged with the moment it used.</p>
+                <div className="cue-art">
+                  <span className="cue-chip">12:41</span>
+                  <span className="cue-chip">48:52</span>
+                </div>
+              </li>
+
+              <li className="cue">
+                <span className="cue-time">31:20</span>
+                <span className="cue-node" />
+                <h3 className="cue-title">Greek and English, mixed</h3>
+                <p className="cue-copy">One multilingual index, so a mid-sentence switch still gets found.</p>
+                <div className="cue-art">
+                  <span className="cue-tag">Ελληνικά</span>
+                  <span className="cue-tag">English</span>
+                </div>
+              </li>
+
+              <li className="cue">
+                <span className="cue-time">48:52</span>
+                <span className="cue-node" />
+                <h3 className="cue-title">Code and diagrams come back whole</h3>
+                <p className="cue-copy">A coding answer returns the block; a data-structure answer returns a diagram.</p>
+                <div className="cue-art">
+                  <span className="cue-code">fib(n - 1) + fib(n - 2)</span>
+                </div>
+              </li>
+
+              <li className="cue">
+                <span className="cue-time">1:12:04</span>
+                <span className="cue-node" />
+                <h3 className="cue-title">Frames, not only words</h3>
+                <p className="cue-copy">Keyframes are embedded too, so a visual moment stays findable.</p>
+                <div className="cue-art cue-art-frames">
+                  <span /><span /><span /><span /><span />
+                </div>
+              </li>
+            </ol>
           </div>
         </div>
       </section>
@@ -380,79 +639,16 @@ function MainPage() {
       <section id="about" className="about-section">
         <ParticlesBackground id="about-particles" />
         <div className="about-section-inner">
-          <div className="about-head reveal">
-            <h2>
-              About <span className="feature-heading-accent">Us</span>
-            </h2>
-          </div>
+          <ChapterHead
+            text="About Us"
+            accentFrom={1}
+            align="left"
+            lede="Re-watching two hours of recording to find one explanation is absurd. So we built the thing we wanted. Ask it anything below."
+          />
 
-          <div className="about-layout">
-            <div className="about-copy reveal reveal-delay-1">
-              <p>
-                Re-watching a two-hour lecture just to find one explanation is tedious.
-                That's why we built Ctrl + Vid.
-              </p>
-              <p>
-                We're two{' '}
-                <InsightSpan word="students" active={activeInsight === 'students'} onToggle={toggleInsight} />{' '}
-                who got tired of dragging a scrubber back and forth. Ctrl + Vid lets you search a
-                lecture like a document: type what you're looking for and jump straight to the{' '}
-                <InsightSpan word="footage" active={activeInsight === 'footage'} onToggle={toggleInsight} />{' '}
-                that matches, without giving up{' '}
-                <InsightSpan word="speed" active={activeInsight === 'speed'} onToggle={toggleInsight} />{' '}
-                or{' '}
-                <InsightSpan word="privacy" active={activeInsight === 'privacy'} onToggle={toggleInsight} />.
-              </p>
-            </div>
-
-            <div className="about-demo reveal reveal-delay-2">
-              <div className="about-demo-topbar">
-                <span className="about-demo-dot about-demo-dot-r" />
-                <span className="about-demo-dot about-demo-dot-y" />
-                <span className="about-demo-dot about-demo-dot-g" />
-                <span className="about-demo-path">search — ctrl+vid</span>
-              </div>
-              <div className="about-demo-body">
-                <div className="about-demo-line">
-                  <span className="about-demo-prompt">&gt;</span>
-                  <span ref={demoQueryRef} className="about-demo-query" />
-                  <span className="type-cursor about-demo-cursor">|</span>
-                </div>
-                <div ref={demoResultRef} className="about-demo-result">
-                  <span className="about-demo-badge">
-                    <span ref={demoTsRef} className="about-demo-ts" />
-                  </span>
-                  <span ref={demoAnswerRef} className="about-demo-answer" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="about-founders reveal reveal-delay-3">
-            <div className="about-founder-list">
-              <div className="about-founder-card">
-                <span className="about-founder-avatar">CB</span>
-                <span className="about-founder-meta">
-                  <span className="about-founder-name">
-                    Christina - Ioanna Bezante
-                  </span>
-                  <span className="about-founder-role">Co-founder</span>
-                </span>
-              </div>
-              <div className="about-founder-card">
-                <span className="about-founder-avatar">EG</span>
-                <span className="about-founder-meta">
-                  <span className="about-founder-name">
-                    Enterisa Gjozi
-                  </span>
-                  <span className="about-founder-role">Co-founder</span>
-                </span>
-              </div>
-            </div>
-          </div>
+          <AboutPrompts />
         </div>
       </section>
-
     </div>
   )
 }

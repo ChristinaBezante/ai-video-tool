@@ -7,7 +7,7 @@ const initEngine = async (engine) => {
   await loadSlim(engine);
 };
 
-export default function ParticlesBackground({ id = 'particles-js' }) {
+export default function ParticlesBackground({ id = 'particles-js', interactive = false, flow = false }) {
   const options = useMemo(() => ({
     fullScreen: { enable: false },
     background: { color: { value: 'transparent' } },
@@ -27,24 +27,29 @@ export default function ParticlesBackground({ id = 'particles-js' }) {
       },
       move: {
         enable: true,
-        speed: 1.2,
-        direction: 'none',
-        random: true,
-        straight: false,
+        // flow: one direction, dead straight, slow — the field reads as
+        // material passing a fixed point rather than drifting aimlessly.
+        speed: flow ? 0.45 : 1.2,
+        direction: flow ? 'right' : 'none',
+        random: !flow,
+        straight: flow,
         outModes: { default: 'out' },
       },
     },
     interactivity: {
       events: {
-        onHover: { enable: true, mode: 'grab' },
+        onHover: { enable: true, mode: interactive ? 'bubble' : 'grab' },
+        onClick: { enable: interactive, mode: 'push' },
         resize: { enable: true },
       },
       modes: {
         grab: { distance: 160, links: { opacity: 0.5 } },
+        bubble: { distance: 180, size: 5, opacity: 1, color: { value: '#ff3b9a' }, duration: 0.4 },
+        push: { quantity: 4 },
       },
     },
     detectRetina: true,
-  }), []);
+  }), [interactive, flow]);
 
   return (
     <ParticlesProvider init={initEngine}>

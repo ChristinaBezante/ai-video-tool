@@ -1,4 +1,5 @@
 # AI Video Tool
+Published in : https://polynoe.lib.uniwa.gr/xmlui/handle/11400/13703
 
 Upload a video (or paste a YouTube link) and chat with it. The backend transcribes the audio, embeds the transcript (and key frames) into a vector store, and answers natural-language questions about the video — with timestamps, code snippets, and Mermaid diagrams when relevant.
 
